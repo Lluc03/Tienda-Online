@@ -12,7 +12,7 @@ class Camera:
         self.target = glm.vec3(0, 1, 0)
         self.fov = 60
         self.perspective = True
-        self.move_speed = 0.1
+        self.move_speed = 0.05
         
         self.m_view = self.get_view_matrix()
         self.m_proj = self.get_projection_matrix()
