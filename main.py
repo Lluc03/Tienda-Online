@@ -9,15 +9,20 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.core.graphics_engine import GraphicsEngine
+from src.gui.menu_gui import GUIManager
 
 def main():
-    """Main function"""
-    try:
-        app = GraphicsEngine()
-        app.run()
-    except Exception as e:
-        print(f"Error running application: {e}")
-        sys.exit(1)
+    # Crear motor gráfico
+    engine = GraphicsEngine()
+    
+    # ✅ CREAR Y CONECTAR EL GUI MANAGER
+    gui_manager = GUIManager(engine.WIN_SIZE)
+    engine.set_gui_manager(gui_manager)
+    
+    print("🚀 Aplicación iniciada - Haz clic derecho para abrir el menú")
+    
+    # Ejecutar aplicación
+    engine.run()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

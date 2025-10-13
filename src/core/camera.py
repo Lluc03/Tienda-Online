@@ -23,7 +23,7 @@ class Camera:
         
         # Speeds - Adjusted for dragging
         self.move_speed = 0.05
-        self.mouse_sensitivity = 0.08  # Slightly more sensitive for dragging
+        self.mouse_sensitivity = 0.1  # Slightly more sensitive for dragging
         
         # Mouse control
         self.first_mouse = True
@@ -57,8 +57,8 @@ class Camera:
         self.up = glm.normalize(glm.cross(self.right, self.forward))
 
     def process_mouse_movement(self, x_offset, y_offset, constrain_pitch=True):
-        x_offset *= self.mouse_sensitivity
-        y_offset *= self.mouse_sensitivity
+        x_offset *= -self.mouse_sensitivity
+        y_offset *= -self.mouse_sensitivity
         
         self.yaw += x_offset
         self.pitch += y_offset
