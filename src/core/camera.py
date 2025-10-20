@@ -36,6 +36,19 @@ class Camera:
         
         self.update_camera_vectors()
 
+    def reset_camera(self):
+        """Resetea la cámara a su posición inicial - NUEVO MÉTODO"""
+        self.position = glm.vec3(0, 1, 5)
+        self.up = glm.vec3(0, 1, 0)
+        self.right = glm.vec3(1, 0, 0)
+        self.forward = glm.vec3(0, 0, -1)
+        self.yaw = -90.0
+        self.pitch = 0.0
+        self.fov = 60
+        self.update_camera_vectors()
+        self.update_view_matrix()
+        print("✓ Cámara resetada a posición inicial")
+
     def get_view_matrix(self):
         return glm.lookAt(self.position, self.position + self.forward, self.up)
     
@@ -71,6 +84,7 @@ class Camera:
                 self.pitch = -89.0
         
         self.update_camera_vectors()
+        self.update_view_matrix()
 
     # Keyboard movement
     def move_forward(self):
@@ -99,3 +113,8 @@ class Camera:
 
     def update_view_matrix(self):
         self.m_view = self.get_view_matrix()
+
+    def update_projection_matrix(self):
+        """Actualiza la matriz de proyección cuando cambia el tamaño de ventana"""
+        self.aspect_ratio = self.app.WIN_SIZE[0] / self.app.WIN_SIZE[1]
+        self.m_proj = self.get_projection_matrix()

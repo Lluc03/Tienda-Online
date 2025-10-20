@@ -1,146 +1,364 @@
 import pygame as pg
-import sys
+import pygame_gui
+from pygame_gui.elements import UIButton, UILabel, UIWindow, UIPanel, UITextBox
 
-class GUIManager:
-    def __init__(self, win_size):
-        self.WIN_SIZE = win_size
-        self.show_context_menu = False
-        self.context_buttons = []
+class MenuGUI:
+    """Clase principal que gestiona todos los menús de la aplicación"""
+    
+    def __init__(self, ui_manager, win_size):
+        self.ui_manager = ui_manager
+        self.win_size = win_size
         
-        # Fuentes
-        try:
-            self.font = pg.font.SysFont('Arial', 32)
-            self.small_font = pg.font.SysFont('Arial', 24)
-            self.title_font = pg.font.SysFont('Arial', 38)
-        except:
-            self.font = pg.font.Font(None, 32)
-            self.small_font = pg.font.Font(None, 24)
-            self.title_font = pg.font.Font(None, 38)
-        
-        print("✅ GUIManager inicializado correctamente")
-
-    def handle_events(self, events, engine):
-        """Manejar eventos de la aplicación"""
-        for event in events:
-            if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
-                self.exit_app(engine)
-            
-            # ✅ CLIC DERECHO - ABRIR MENÚ
-            elif event.type == pg.MOUSEBUTTONDOWN and event.button == 3:
-                self.show_context_menu = True
-                print("📋 Context menu opened")
-            
-            # CLIC IZQUIERDO
-            elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-                mouse_pos = event.pos
-                
-                if self.show_context_menu:
-                    button_clicked = False
-                    for button in self.context_buttons:
-                        if button["rect"].collidepoint(mouse_pos):
-                            print(f"✅ Button clicked: {button['text']}")
-                            button["action"](engine)
-                            button_clicked = True
-                            break
-                    
-                    if not button_clicked:
-                        self.show_context_menu = False
-                        print("❌ Context menu closed")
-                
-                else:
-                    engine.left_mouse_pressed = True
-                    engine.camera.first_mouse = True
-            
-            elif event.type == pg.MOUSEBUTTONUP and event.button == 1:
-                engine.left_mouse_pressed = False
-            
-            elif event.type == pg.MOUSEMOTION and engine.left_mouse_pressed and not self.show_context_menu:
-                engine.handle_mouse_movement(event)
-        
-        engine.handle_keyboard_input()
-
-    def render(self, engine):
-        """Renderizar la GUI"""
-        if not self.show_context_menu:
-            return
-            
-        overlay = pg.Surface(self.WIN_SIZE, pg.SRCALPHA)
-        overlay.fill((0, 0, 0, 0))
-        self.draw_context_menu(overlay)
-        engine.render_overlay(overlay)
-
-    def draw_context_menu(self, overlay):
-        """Dibujar el menú contextual"""
-        menu_width, menu_height = 400, 300
-        menu_x = (self.WIN_SIZE[0] - menu_width) // 2
-        menu_y = (self.WIN_SIZE[1] - menu_height) // 2
-
-        # Fondo con sombra
-        shadow_rect = pg.Rect(menu_x + 5, menu_y + 5, menu_width, menu_height)
-        pg.draw.rect(overlay, (0, 0, 0, 100), shadow_rect, border_radius=12)
-        
-        # Fondo principal
-        menu_rect = pg.Rect(menu_x, menu_y, menu_width, menu_height)
-        pg.draw.rect(overlay, (35, 35, 45, 250), menu_rect, border_radius=12)
-        pg.draw.rect(overlay, (80, 80, 120, 255), menu_rect, 3, border_radius=12)
-        
-        # Título
-        title_text = self.title_font.render("3D STORE", True, (255, 255, 255))
-        title_rect = title_text.get_rect(center=(menu_x + menu_width//2, menu_y + 40))
-        overlay.blit(title_text, title_rect)
-        
-        # Línea separadora
-        pg.draw.line(overlay, (100, 100, 140, 255), 
-                    (menu_x + 30, menu_y + 70), 
-                    (menu_x + menu_width - 30, menu_y + 70), 2)
-        
-        # Texto informativo
-        info_lines = [
-            "EXI | Vbb",
-            "## @yobbju@ Cstf", 
-            "EXI | APP",
-            "3D Store System"
-        ]
-        
-        text_y = menu_y + 100
-        for i, line in enumerate(info_lines):
-            color = (255, 255, 255) if i == 0 else (200, 200, 220)
-            font = self.font if i == 0 else self.small_font
-            
-            text_surface = font.render(line, True, color)
-            text_rect = text_surface.get_rect(center=(menu_x + menu_width//2, text_y))
-            overlay.blit(text_surface, text_rect)
-            text_y += 35 if i == 0 else 30
+        # Menús
+        self.main_menu = None
+        self.context_menu = None
+        self.product_menu = None
+        self.cart_menu = None
+        self.config_menu = None
         
         # Botones
-        buttons = [
-            {
-                "text": "🛒 SHOPPING CART", 
-                "rect": pg.Rect(menu_x + 50, menu_y + 220, menu_width - 100, 45), 
-                "action": self.show_cart
-            },
-            {
-                "text": "❌ EXIT APP", 
-                "rect": pg.Rect(menu_x + 50, menu_y + 275, menu_width - 100, 45), 
-                "action": self.exit_app
-            },
+        self.product_buttons = []
+        
+        # Estado
+        self.current_menu = None
+        
+    def create_main_menu(self):
+        """Crea el menú principal de la aplicación"""
+        if self.main_menu:
+            self.main_menu.kill()
+            
+        self.main_menu = UIWindow(
+            rect=pg.Rect(20, 20, 300, 500),
+            manager=self.ui_manager,
+            window_display_title='3D Store Menu',
+            object_id='#main_menu'
+        )
+
+        y_pos = 10
+        spacing = 45
+
+        # Título
+        UILabel(
+            relative_rect=pg.Rect(10, y_pos, 280, 30),
+            text='Bienvenido a la Tienda 3D',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#title_label'
+        )
+        y_pos += spacing
+
+        # Botones principales
+        self.btn_productos = UIButton(
+            relative_rect=pg.Rect(10, y_pos, 280, 35),
+            text='📦 Productos',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#btn_productos'
+        )
+        y_pos += spacing
+
+        self.btn_carrito = UIButton(
+            relative_rect=pg.Rect(10, y_pos, 280, 35),
+            text='🛒 Carrito de Compras',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#btn_carrito'
+        )
+        y_pos += spacing
+
+        self.btn_config = UIButton(
+            relative_rect=pg.Rect(10, y_pos, 280, 35),
+            text='⚙️ Configuración',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#btn_config'
+        )
+        y_pos += spacing + 10
+
+        # Sección de controles
+        self._create_controls_section(y_pos)
+        
+        return self.main_menu
+
+    def _create_controls_section(self, y_pos):
+        """Crea la sección de controles del menú principal"""
+        UILabel(
+            relative_rect=pg.Rect(10, y_pos, 280, 25),
+            text='Controles de Cámara:',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#controls_title'
+        )
+        y_pos += 30
+
+        controls_text = [
+            '• WASD: Movimiento',
+            '• Ratón: Mirar alrededor',
+            '• Click derecho: Menú contextual',
+            '• M: Mostrar/ocultar menú'
         ]
         
-        self.context_buttons = buttons
+        for control in controls_text:
+            UILabel(
+                relative_rect=pg.Rect(10, y_pos, 280, 20),
+                text=control,
+                manager=self.ui_manager,
+                container=self.main_menu,
+                object_id='#control_item'
+            )
+            y_pos += 25
 
-        for button in buttons:
-            pg.draw.rect(overlay, (60, 110, 170, 255), button["rect"], border_radius=10)
-            pg.draw.rect(overlay, (160, 160, 190, 255), button["rect"], 2, border_radius=10)
+        y_pos += 10
+
+        # Botón cerrar
+        self.btn_close_menu = UIButton(
+            relative_rect=pg.Rect(10, y_pos, 280, 35),
+            text='❌ Cerrar Menú (M)',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#btn_close'
+        )
+
+    def create_context_menu(self, pos):
+        """Crea el menú contextual en posición específica"""
+        if self.context_menu:
+            self.context_menu.kill()
             
-            button_text = self.small_font.render(button["text"], True, (255, 255, 255))
-            button_text_rect = button_text.get_rect(center=button["rect"].center)
-            overlay.blit(button_text, button_text_rect)
+        x, y = pos
+        self.context_menu = UIWindow(
+            rect=pg.Rect(x, y, 180, 150),
+            manager=self.ui_manager,
+            window_display_title='Menú Rápido',
+            object_id='#context_menu'
+        )
 
-    def show_cart(self, engine):
-        print("🛒 Shopping cart opened!")
-        self.show_context_menu = False
+        self.btn_reset_cam = UIButton(
+            relative_rect=pg.Rect(5, 5, 170, 30),
+            text='🔄 Reset Camera',
+            manager=self.ui_manager,
+            container=self.context_menu,
+            object_id='#btn_reset'
+        )
 
-    def exit_app(self, engine):
-        engine.cleanup()
-        pg.quit()
-        sys.exit()
+        self.btn_fullscreen = UIButton(
+            relative_rect=pg.Rect(5, 40, 170, 30),
+            text='📺 Toggle Fullscreen',
+            manager=self.ui_manager,
+            container=self.context_menu,
+            object_id='#btn_fullscreen'
+        )
+
+        self.btn_exit_app = UIButton(
+            relative_rect=pg.Rect(5, 75, 170, 30),
+            text='🚪 Exit',
+            manager=self.ui_manager,
+            container=self.context_menu,
+            object_id='#btn_exit'
+        )
+        
+        return self.context_menu
+
+    def create_products_menu(self):
+        """Crea el menú de productos"""
+        if self.product_menu:
+            self.product_menu.kill()
+            
+        self.product_menu = UIWindow(
+            rect=pg.Rect(350, 50, 400, 500),
+            manager=self.ui_manager,
+            window_display_title='Catálogo de Productos',
+            object_id='#products_menu'
+        )
+
+        # Título
+        UILabel(
+            relative_rect=pg.Rect(10, 10, 380, 30),
+            text='Nuestros Productos 3D',
+            manager=self.ui_manager,
+            container=self.product_menu,
+            object_id='#products_title'
+        )
+
+        # Lista de productos (ejemplo)
+        products = [
+            "Silla Moderna - $150",
+            "Mesa Centro - $300", 
+            "Lámpara LED - $80",
+            "Estantería - $200",
+            "Sofá - $500"
+        ]
+        
+        y_pos = 50
+        self.product_buttons = []
+        for i, product in enumerate(products):
+            btn = UIButton(
+                relative_rect=pg.Rect(10, y_pos, 380, 35),
+                text=product,
+                manager=self.ui_manager,
+                container=self.product_menu,
+                object_id=f'#product_{i}'
+            )
+            self.product_buttons.append(btn)
+            y_pos += 45
+
+        # Botón cerrar - IMPORTANTE: Guardar como atributo
+        self.btn_close_products = UIButton(
+            relative_rect=pg.Rect(10, y_pos + 10, 380, 35),
+            text='Cerrar',
+            manager=self.ui_manager,
+            container=self.product_menu,
+            object_id='#btn_close_products'
+        )
+        
+        return self.product_menu
+
+    def create_cart_menu(self):
+        """Crea el menú del carrito de compras"""
+        if self.cart_menu:
+            self.cart_menu.kill()
+            
+        self.cart_menu = UIWindow(
+            rect=pg.Rect(350, 50, 400, 400),
+            manager=self.ui_manager,
+            window_display_title='Carrito de Compras',
+            object_id='#cart_menu'
+        )
+
+        # Contenido del carrito
+        UITextBox(
+            relative_rect=pg.Rect(10, 10, 380, 250),
+            html_text="<b>Tu carrito está vacío</b><br>Agrega productos desde el catálogo",
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#cart_content'
+        )
+
+        # Botones del carrito - IMPORTANTE: Guardar como atributos
+        self.btn_continue_shopping = UIButton(
+            relative_rect=pg.Rect(10, 270, 185, 35),
+            text='Seguir Comprando',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_continue_shopping'
+        )
+
+        self.btn_checkout = UIButton(
+            relative_rect=pg.Rect(205, 270, 185, 35),
+            text='Checkout',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_checkout'
+        )
+
+        self.btn_close_cart = UIButton(
+            relative_rect=pg.Rect(10, 315, 380, 35),
+            text='Cerrar Carrito',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_close_cart'
+        )
+        
+        return self.cart_menu
+
+    def create_config_menu(self):
+        """Crea el menú de configuración"""
+        if self.config_menu:
+            self.config_menu.kill()
+            
+        self.config_menu = UIWindow(
+            rect=pg.Rect(350, 50, 400, 450),
+            manager=self.ui_manager,
+            window_display_title='Configuración',
+            object_id='#config_menu'
+        )
+
+        y_pos = 10
+        
+        # Configuración de gráficos
+        UILabel(
+            relative_rect=pg.Rect(10, y_pos, 380, 25),
+            text='Configuración de Gráficos:',
+            manager=self.ui_manager,
+            container=self.config_menu,
+            object_id='#graphics_title'
+        )
+        y_pos += 30
+
+        # Opciones de configuración (ejemplo)
+        config_options = [
+            ("Calidad de Texturas", ["Baja", "Media", "Alta"]),
+            ("Resolución", ["1280x720", "1920x1080", "2560x1440"]),
+            ("Sombras", ["Desactivadas", "Activadas"]),
+            ("Anti-aliasing", ["Off", "2x", "4x", "8x"])
+        ]
+        
+        for option_name, options in config_options:
+            UILabel(
+                relative_rect=pg.Rect(10, y_pos, 180, 25),
+                text=option_name,
+                manager=self.ui_manager,
+                container=self.config_menu,
+                object_id=f'#label_{option_name.lower()}'
+            )
+            y_pos += 30
+
+        # Botones de configuración - IMPORTANTE: Guardar como atributos
+        self.btn_apply_config = UIButton(
+            relative_rect=pg.Rect(10, y_pos + 20, 185, 35),
+            text='Aplicar Cambios',
+            manager=self.ui_manager,
+            container=self.config_menu,
+            object_id='#btn_apply_config'
+        )
+
+        self.btn_close_config = UIButton(
+            relative_rect=pg.Rect(205, y_pos + 20, 185, 35),
+            text='Cerrar',
+            manager=self.ui_manager,
+            container=self.config_menu,
+            object_id='#btn_close_config'
+        )
+        
+        return self.config_menu
+
+    def show_menu(self, menu_type):
+        """Muestra un menú específico"""
+        self.hide_all_menus()
+        
+        if menu_type == "main":
+            self.current_menu = self.main_menu
+            if self.main_menu:
+                self.main_menu.show()
+        elif menu_type == "products":
+            self.current_menu = self.create_products_menu()
+        elif menu_type == "cart":
+            self.current_menu = self.create_cart_menu()
+        elif menu_type == "config":
+            self.current_menu = self.create_config_menu()
+            
+        return self.current_menu
+
+    def hide_all_menus(self):
+        """Oculta todos los menús"""
+        for menu in [self.main_menu, self.context_menu, self.product_menu, 
+                    self.cart_menu, self.config_menu]:
+            if menu:
+                menu.hide()
+
+    def toggle_main_menu(self):
+        """Alterna la visibilidad del menú principal"""
+        if self.main_menu:
+            if self.main_menu.visible:
+                self.main_menu.hide()
+                return False
+            else:
+                self.main_menu.show()
+                return True
+        return False
+
+    def cleanup(self):
+        """Limpia todos los recursos de UI"""
+        for menu in [self.main_menu, self.context_menu, self.product_menu,
+                    self.cart_menu, self.config_menu]:
+            if menu:
+                menu.kill()

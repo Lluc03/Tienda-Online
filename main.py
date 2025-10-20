@@ -9,20 +9,32 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.core.graphics_engine import GraphicsEngine
-from src.gui.menu_gui import GUIManager
 
 def main():
-    # Crear motor gráfico
-    engine = GraphicsEngine()
-    
-    # ✅ CREAR Y CONECTAR EL GUI MANAGER
-    gui_manager = GUIManager(engine.WIN_SIZE)
-    engine.set_gui_manager(gui_manager)
-    
-    print("🚀 Aplicación iniciada - Haz clic derecho para abrir el menú")
-    
-    # Ejecutar aplicación
-    engine.run()
+    """Función principal de la aplicación"""
+    try:
+        # Crear y ejecutar el motor gráfico
+        engine = GraphicsEngine()
+        
+        print("🚀 Aplicación 3D Store iniciada correctamente")
+        print("=" * 50)
+        print("Controles:")
+        print("• M: Mostrar/ocultar menú principal")
+        print("• Click derecho: Menú contextual") 
+        print("• Click izquierdo + arrastrar: Controlar cámara")
+        print("• WASD/Flechas: Movimiento de cámara")
+        print("• ESC: Salir de la aplicación")
+        print("=" * 50)
+        
+        # Ejecutar loop principal
+        engine.run()
+        
+    except Exception as e:
+        print(f"❌ Error al iniciar la aplicación: {e}")
+        import traceback
+        traceback.print_exc()
+        input("Presiona Enter para salir...")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
