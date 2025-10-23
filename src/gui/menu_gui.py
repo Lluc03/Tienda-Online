@@ -181,11 +181,11 @@ class MenuGUI:
 
         # Lista de productos (ejemplo)
         products = [
-            "Silla Moderna - $150",
-            "Mesa Centro - $300", 
-            "Lámpara LED - $80",
-            "Estantería - $200",
-            "Sofá - $500"
+            "Manzanas",
+            "Leche", 
+            "Galletas",
+            "Hamburguesas",
+            "Pollo"
         ]
         
         y_pos = 50
