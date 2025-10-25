@@ -14,3 +14,12 @@ __pycache__/
 # Configuración del sistema
 .idea/
 .vscode/
+
+# Blender / grandes / temporales
+*.blend
+*.exr
+*.zip
+*.rar
+*.7z
+*.tmp
+*.bak
