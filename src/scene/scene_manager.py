@@ -6,57 +6,40 @@ class SceneManager:
     def __init__(self, app):
         self.app = app
         self.objects = []
-        self.current_scene = "main"  # ✅ Estado de la escena actual
+        self.current_scene = "main"
         self.setup_scene()
     
-    def setup_scene(self):
-        """Setup the basic room scene"""
-        # Create floor
-        self.floor = Floor(self.app)
-        self.objects.append(self.floor)
-        
-        # Create walls
-        self.walls = [
-            Wall(self.app, glm.vec3(0, 2.5, -5), glm.vec3(10, 5, 0.1), (0.7, 0.7, 0.9)),
-            Wall(self.app, glm.vec3(-5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.9, 0.7, 0.7)),
-            Wall(self.app, glm.vec3(5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.7, 0.9, 0.7)),
-        ]
-        self.objects.extend(self.walls)
-    
-    def set_scene(self, scene_name):
-        """
-        Cambia la escena actual
-        
-        Args:
-            scene_name (str): Nombre de la escena ("main", "products", "cart", "config")
-        """
-        print(f"✓ Cambiando escena a: {scene_name}")
-        self.current_scene = scene_name
-        
-        if scene_name == "main":
-            # Restaurar escena principal
-            pass
-        elif scene_name == "products":
-            # Configurar vista de productos
-            pass
-        elif scene_name == "cart":
-            # Configurar vista de carrito
-            pass
-        elif scene_name == "config":
-            # Configurar vista de configuración
-            pass
-    
-    def get_current_scene(self):
-        """Retorna la escena actual"""
-        return self.current_scene
     
     def render(self):
-        """Render all objects in the scene"""
         for obj in self.objects:
             obj.update_matrices()
             obj.render()
-    
+
+
     def cleanup(self):
-        """Clean up all scene objects"""
+        # Liberar recursos de todos los objetos
         for obj in self.objects:
-            obj.destroy()
+            try:
+                obj.destroy()
+            except Exception as e:
+                print(f"Error liberando objeto {obj}: {e}")
+
+    def setup_scene(self):
+        # Rutas (ajústalas a tu repo)
+        floor_tex = "assets/textures/floor_diffuse.png"  # o .jpg
+        wall_tex  = "assets/textures/wall_diffuse.png"
+
+        # Suelo con textura (tiling 4x4)
+        self.floor = Floor(self.app, texture_path=floor_tex, uv_scale=(4.0, 4.0))
+        self.objects.append(self.floor)
+
+        # Paredes con textura (tiling horizontal 2x, vertical 1x)
+        self.walls = [
+            Wall(self.app, glm.vec3(0, 2.5, -5), glm.vec3(10, 5, 0.1), (0.7, 0.7, 0.9),
+                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
+            Wall(self.app, glm.vec3(-5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.9, 0.7, 0.7),
+                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
+            Wall(self.app, glm.vec3(5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.7, 0.9, 0.7),
+                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
+        ]
+        self.objects.extend(self.walls)
