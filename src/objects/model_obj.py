@@ -23,6 +23,7 @@ class ModelOBJ(BaseObject):
         self._rotation = glm.vec3(*rotation_deg)  # (pitch, yaw, roll) en grados
         self._invert_v = invert_v
         self._aabb     = None
+        self._texture_path = texture_path
         super().__init__(app, texture_path=texture_path, uv_scale=(1.0, 1.0))
 
     # ---------- Transform ----------
@@ -126,3 +127,22 @@ class ModelOBJ(BaseObject):
     def update_matrices(self):
         self.m_model = self.get_model_matrix()
         super().update_matrices()
+    
+    def aabb_local_sizes(self):
+        if not self._aabb:
+            return 0.0, 0.0, 0.0
+        sx = self._aabb[1][0] - self._aabb[0][0]
+        sy = self._aabb[1][1] - self._aabb[0][1]
+        sz = self._aabb[1][2] - self._aabb[0][2]
+        return sx, sy, sz
+
+    def clone(self):
+        """ Crea otra instancia que comparte geometría/texture (usa la caché del loader). """
+        return type(self)(
+            self.app, self.obj_path, self._texture_path if self._texture_path else None,
+            position=(self._position.x, self._position.y, self._position.z),
+            scale=(self._scale.x, self._scale.y, self._scale.z),
+            rotation_deg=(self._rotation.x, self._rotation.y, self._rotation.z),
+            invert_v=self._invert_v
+        )
+
