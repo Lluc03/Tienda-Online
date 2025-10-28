@@ -1,3 +1,4 @@
+# scene_manager.py
 import glm
 from src.objects.floor import Floor
 from src.objects.wall import Wall
@@ -13,12 +14,10 @@ class SceneManager:
         self.current_scene = "main"
         self.setup_scene()
     
-    
     def render(self):
         for obj in self.objects:
             obj.update_matrices()
             obj.render()
-
 
     def cleanup(self):
         # Liberar recursos de todos los objetos
@@ -27,51 +26,119 @@ class SceneManager:
                 obj.destroy()
             except Exception as e:
                 print(f"Error liberando objeto {obj}: {e}")
-    
-    def _register_shelves_from_models(self, models, levels=5, margin_xy=0.02, back_offset=0.02):
-        """ Crea objetos ShelfSpace a partir de una lista de ModelOBJ ya colocados. """
-        self.shelf_spaces = [ShelfSpace(m, levels=levels, margin_xy=margin_xy, back_offset=back_offset) for m in models]
 
-    def _fill_shelf_with_model(self, shelf_space, obj_path, tex_path, target_longest=0.22, gap=0.04, max_items_per_level=None, y_clearance=0.001):
+    # --- actualizado: expone y pasa y_bin/board_merge a ShelfSpace ---
+    def _register_shelves_from_models(
+        self,
+        models,
+        levels=5,
+        margin_xy=0.03,
+        back_offset=0.03,
+        y_bin=0.005,
+        board_merge=0.045,
+        per_level_shrink=0.01,
+        debug = False
+    ):
         """
-        Rellena cada balda de shelf_space con copias de un modelo:
-        - target_longest: tamaño objetivo del lado mayor del producto (m).
-        - gap: separación lateral/frontal.
-        - y_clearance: pequeño offset para evitar z-fighting al apoyar.
+        Crea ShelfSpace para cada ModelOBJ. Mantiene firma compatible.
+        'models' es una lista de objetos ModelOBJ ya posicionados.
         """
-        # 1) Cargar una "plantilla" del producto (se compartirá geometría por cache)
-        proto = ModelOBJ(self.app, obj_path, tex_path, position=(0,0,0), scale=(1,1,1), rotation_deg=(0,0,0))
+        self.shelf_spaces = []
+        for idx, m in enumerate(models):
+            label = f"shelf{idx}"
+            sp = ShelfSpace(
+                m,
+                levels=levels,
+                margin_xy=margin_xy,
+                back_offset=back_offset,
+                y_bin=y_bin,
+                board_merge=board_merge,
+                per_level_shrink=per_level_shrink,
+                label=label,
+                debug=debug,
+            )
+            self.shelf_spaces.append(sp)
+
+    def _fill_shelf_with_model(
+        self,
+        shelf_space,
+        obj_path,
+        tex_path,
+        target_longest=0.22,
+        gap=0.04,
+        max_items_per_level=None,
+        y_clearance=0.004,
+    ):
+        """
+        Rellena cada balda de shelf_space con copias de un modelo.
+        - Apoya por base real (min_y_local) + y_clearance.
+        - Imprime información de footprint y uso por balda (cols/rows/skip).
+        """
+        # plantilla del producto
+        proto = ModelOBJ(
+            self.app,
+            obj_path,
+            tex_path,
+            position=(0, 0, 0),
+            scale=(1, 1, 1),
+            rotation_deg=(0, 0, 0),
+        )
         proto.auto_scale_by_longest_side(target_longest)
 
-        # Huella (w,d) y alto (h) del AABB ESCALADO
-        sx, sy, sz = proto.aabb_local_sizes()     # tamaños en espacio local
+        # huella y alto del AABB escalado
+        sx, sy, sz = proto.aabb_local_sizes()
         w = sx * proto._scale.x
         h = sy * proto._scale.y
         d = sz * proto._scale.z
         footprint = (w, d)
+        min_y_local = proto.min_y_local()
 
+        print(f"[Fill] item footprint w={w:.3f} d={d:.3f} h={h:.3f} "
+            f"min_y_local={min_y_local:.3f} gap={gap:.3f} y_clearance={y_clearance:.3f}")
 
         spawned = []
-        for lvl in shelf_space.get_levels():
-            # 2) Calcular las posiciones en esta balda (centros) con el packer
-            poses = pack_grid_on_shelf(lvl, footprint, gap=gap, max_items=max_items_per_level)
-            # 3) Crear instancias y posicionarlas
-            # La y del packer es la "altura de balda"; apoyamos elevando medio alto del producto
-            for (x, y, z) in poses:
+        import math
+
+        for i, lvl in enumerate(shelf_space.get_levels()):
+            y_balda = lvl["y"]
+            y_top = lvl.get("y_top")
+
+            # altura libre (si hay techo medido)
+            if y_top is not None:
+                headroom = y_top - y_balda
+                needed = h + y_clearance + 0.010  # 1 cm holgura
+                if headroom < needed:
+                    print(f"[Fill] skip {shelf_space.label} L{i} y={y_balda:.3f}: "
+                        f"headroom={headroom:.3f} < needed={needed:.3f}")
+                    continue
+
+            x0, x1 = lvl["x0"], lvl["x1"]
+            z0, z1 = lvl["z0"], lvl["z1"]
+            usable_w = max(0.0, x1 - x0)
+            usable_d = max(0.0, z1 - z0)
+            cols = max(0, math.floor((usable_w + gap) / (w + gap)))
+            rows = max(0, math.floor((usable_d + gap) / (d + gap)))
+            print(f"[Fill] use {shelf_space.label} L{i} y={y_balda:.3f} "
+                f"rect=({x0:.3f},{x1:.3f})x({z0:.3f},{z1:.3f}) "
+                f"usable=({usable_w:.3f},{usable_d:.3f}) -> cols={cols} rows={rows}")
+
+            poses = pack_grid_on_shelf(
+                level_rect=lvl, footprint=footprint, gap=gap, max_items=max_items_per_level
+            )
+            for (x, y_level, z) in poses:
                 item = proto.clone()
-                # posición -> ajustar y para apoyar: y_balda + h/2 + clearance
-                item.set_position((x, y + h/2.0 + y_clearance, z))
-                # si quieres orientar la manzana aleatoriamente (yaw), descomenta:
-                # item.set_rotation((0.0, random.uniform(0, 360), 0.0))
+                y_item = y_level - (min_y_local * item._scale.y) + y_clearance
+                item.set_position((x, y_item, z))
                 spawned.append(item)
                 self.objects.append(item)
 
         return spawned
 
 
+
     def setup_scene(self):
         # Rutas (ajústalas a tu repo)
-        floor_tex = "assets/textures/floor_diffuse.png"  # o .jpg
+        floor_tex = "assets/textures/floor_diffuse.png"
         wall_tex  = "assets/textures/wall_diffuse.png"
 
         # Suelo con textura (tiling 4x4)
@@ -80,12 +147,30 @@ class SceneManager:
 
         # Paredes con textura (tiling horizontal 2x, vertical 1x)
         self.walls = [
-            Wall(self.app, glm.vec3(0, 2.5, -5), glm.vec3(10, 5, 0.1), (0.7, 0.7, 0.9),
-                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
-            Wall(self.app, glm.vec3(-5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.9, 0.7, 0.7),
-                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
-            Wall(self.app, glm.vec3(5, 2.5, 0), glm.vec3(0.1, 5, 10), (0.7, 0.9, 0.7),
-                 texture_path=wall_tex, uv_scale=(2.0, 1.0)),
+            Wall(
+                self.app,
+                glm.vec3(0, 2.5, -5),
+                glm.vec3(10, 5, 0.1),
+                (0.7, 0.7, 0.9),
+                texture_path=wall_tex,
+                uv_scale=(2.0, 1.0),
+            ),
+            Wall(
+                self.app,
+                glm.vec3(-5, 2.5, 0),
+                glm.vec3(0.1, 5, 10),
+                (0.9, 0.7, 0.7),
+                texture_path=wall_tex,
+                uv_scale=(2.0, 1.0),
+            ),
+            Wall(
+                self.app,
+                glm.vec3(5, 2.5, 0),
+                glm.vec3(0.1, 5, 10),
+                (0.7, 0.9, 0.7),
+                texture_path=wall_tex,
+                uv_scale=(2.0, 1.0),
+            ),
         ]
         self.objects.extend(self.walls)
 
@@ -93,37 +178,38 @@ class SceneManager:
         shelf_model = "assets/models/shelf01.obj"
         shelf_tex   = "assets/textures/shelf01_diffuse.jpg"
 
-        # Crea con escala 1 para autoescalar después
         shelf_left = ModelOBJ(
             self.app, shelf_model, shelf_tex,
-            position=(-3.5, 0.0, -3.0),      # lateral izquierdo
+            position=(-3.5, 0.0, -3.0),
             scale=(1.0, 1.0, 1.0),
-            rotation_deg=(0.0, 90.0, 0.0)    # mirando al pasillo
+            rotation_deg=(0.0, 90.0, 0.0)   # mirando al pasillo
         )
         shelf_right = ModelOBJ(
             self.app, shelf_model, shelf_tex,
-            position=( 3.5, 0.0, -3.0),      # lateral derecho
+            position=( 3.5, 0.0, -3.0),
             scale=(1.0, 1.0, 1.0),
-            rotation_deg=(0.0, -90.0, 0.0)
+            rotation_deg=(0.0, -90.0, 0.0)  # mirando al pasillo
         )
 
-        # Escala para que su lado mayor sea ~2.4 u. (ajusta 2.0–2.6 a gusto)
+        # Escalado y apoyo al suelo
         for sh in (shelf_left, shelf_right):
             sh.auto_scale_by_longest_side(2.4)
-            # re-coloca (x,z) y apóyala en el suelo
-            # (set_position primero; align_to_floor corrige la Y)
             x, z = sh._position.x, sh._position.z
             sh.set_position((x, 0.0, z))
             sh.align_to_floor()
 
         self.objects += [shelf_left, shelf_right]
 
-        # Crear los espacios de las estanterías
+        # Crear espacios (con parámetros robustos para detectar baldas)
         self._register_shelves_from_models(
             [shelf_left, shelf_right],
             levels=5,
             margin_xy=0.03,
-            back_offset=0.03
+            back_offset=0.03,
+            y_bin=0.005,
+            board_merge=0.045,
+            per_level_shrink=0.01,
+            debug=True
         )
 
         # Rellenar con manzanas
@@ -135,7 +221,8 @@ class SceneManager:
                 shelf_space,
                 obj_path=apple_model,
                 tex_path=apple_tex,
-                target_longest=0.22,   # 22 cm (tamaño real de una manzana grande)
-                gap=0.04,              # separación lateral/frontal
-                max_items_per_level=None
+                target_longest=0.22,  # ~22 cm
+                gap=0.04,
+                max_items_per_level=None,
+                y_clearance=0.004,    # explícito
             )

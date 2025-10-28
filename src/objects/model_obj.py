@@ -4,6 +4,7 @@ import numpy as np
 import glm
 
 _GEOM_CACHE = {}  # path -> (vertex_bytes, aabb_min, aabb_max)
+_TRI_CACHE = {}  # path -> {'positions': list[(x,y,z)], 'tri_idx': list[(i0,i1,i2)]}
 
 class ModelOBJ(BaseObject):
     """
@@ -41,45 +42,57 @@ class ModelOBJ(BaseObject):
     def set_rotation(self, deg): self._rotation = glm.vec3(*deg)
 
     # ---------- Geometría ----------
+
     def get_vertex_data(self):
+        # -- Intentar leer de caché de geometría --
         if self.obj_path in _GEOM_CACHE:
             vb, mn, mx = _GEOM_CACHE[self.obj_path]
             self._aabb = (mn, mx)
+            # Recuperar posiciones/triángulos si ya existen en caché auxiliar
+            extra = _TRI_CACHE.get(self.obj_path)
+            if extra:
+                self._raw_positions = extra.get('positions')
+                self._triangles_idx = extra.get('tri_idx')
             print(f"[ModelOBJ] cache '{self.obj_path}': {len(vb)//20} verts, AABB {mn}..{mx}")
             return vb
 
         positions, texcoords = [], []
-        stream = []  # [x,y,z,u,v]*N
+        stream = []
+        tri_idx = []  # lista de (i0,i1,i2) en índices de positions
 
         try:
             with open(self.obj_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     if not line or line.startswith('#'):
                         continue
-                    if line.startswith('v '):  # posición
+                    if line.startswith('v '):
                         _, x, y, z = line.strip().split()[:4]
                         positions.append((float(x), float(y), float(z)))
-                    elif line.startswith('vt '):  # uv
+                    elif line.startswith('vt '):
                         parts = line.strip().split()
                         if len(parts) >= 3:
                             _, u, v = parts[:3]
                             u, v = float(u), float(v)
-                            if self._invert_v: v = 1.0 - v
+                            if self._invert_v:
+                                v = 1.0 - v
                             texcoords.append((u, v))
-                    elif line.startswith('f '):  # cara (triangulamos por fan)
-                        items = line.strip().split()[1:]  # v/vt/vn o v/vt o v//vn o v
+                    elif line.startswith('f '):
+                        items = line.strip().split()[1:]
                         idx = []
                         for it in items:
                             a = it.split('/')
                             vi = int(a[0])
                             ti = int(a[1]) if len(a) > 1 and a[1] != '' else 0
-                            # índices negativos → relativos al final
                             if vi < 0: vi = len(positions) + vi + 1
                             if ti < 0: ti = len(texcoords) + ti + 1
-                            idx.append((vi-1, ti-1))
-                        # fan: (0, i, i+1)
-                        for i in range(1, len(idx)-1):
-                            for k in (0, i, i+1):
+                            idx.append((vi - 1, ti - 1))
+                        # Triangulación tipo fan
+                        for i in range(1, len(idx) - 1):
+                            fan = (0, i, i + 1)
+                            # Guardar triángulo de índices (en positions)
+                            tri_idx.append((idx[fan[0]][0], idx[fan[1]][0], idx[fan[2]][0]))
+                            # Volcar al stream intercalado pos+uv
+                            for k in fan:
                                 vi, ti = idx[k]
                                 x, y, z = positions[vi]
                                 if 0 <= ti < len(texcoords):
@@ -100,12 +113,72 @@ class ModelOBJ(BaseObject):
         mx = (max(xs), max(ys), max(zs))
         self._aabb = (mn, mx)
 
+        # Guardar datos locales para detectar baldas
+        self._raw_positions = positions
+        self._triangles_idx = tri_idx
+        _TRI_CACHE[self.obj_path] = {'positions': positions, 'tri_idx': tri_idx}
+
         vb = np.array(stream, dtype='f4').tobytes()
         _GEOM_CACHE[self.obj_path] = (vb, mn, mx)
         print(f"[ModelOBJ] loaded(fallback) '{self.obj_path}': {len(stream)//5} verts, AABB {mn}..{mx}")
         return vb
 
+    
     # ---------- Utilidades ----------
+
+    def get_world_triangles(self):
+        """
+        Devuelve lista de triángulos en mundo: [(p0, p1, p2), ...]
+        donde p* son glm.vec3. Requiere _raw_positions y _triangles_idx.
+        """
+        if not hasattr(self, '_raw_positions') or self._raw_positions is None:
+            return []
+        if not hasattr(self, '_triangles_idx') or self._triangles_idx is None:
+            return []
+        M = self.get_model_matrix()
+        wp = [glm.vec3(M * glm.vec4(x, y, z, 1.0)) for (x, y, z) in self._raw_positions]
+        tris = []
+        for i0, i1, i2 in self._triangles_idx:
+            tris.append((wp[i0], wp[i1], wp[i2]))
+        return tris
+
+    def get_world_triangles_and_normals(self):
+        """
+        Devuelve lista de tuplas: [((p0,p1,p2), n), ...] en espacio mundo,
+        con n = normal unitaria del tri (orientación por producto cruzado).
+        """
+        tris = self.get_world_triangles()
+        out = []
+        for (p0, p1, p2) in tris:
+            e1 = p1 - p0
+            e2 = p2 - p0
+            n = glm.normalize(glm.cross(e1, e2)) if glm.length(glm.cross(e1, e2)) > 1e-9 else glm.vec3(0, 1, 0)
+            out.append(((p0, p1, p2), n))
+        return out
+    
+    def get_world_positions(self):
+        """Devuelve lista de glm.vec3 de los vértices en mundo (con m_model actual)."""
+        if not hasattr(self, '_raw_positions') or self._raw_positions is None:
+            return []
+        M = self.get_model_matrix()
+        return [glm.vec3(M * glm.vec4(x, y, z, 1.0)) for (x, y, z) in self._raw_positions]
+
+    def min_y_local(self):
+        """min_y del AABB local del modelo (sin escala)."""
+        if not self._aabb:
+            return 0.0
+        return self._aabb[0][1]
+
+    def height_width_depth_scaled(self):
+        """Tamaños escalados del AABB local."""
+        if not self._aabb:
+            return 0.0, 0.0, 0.0
+        mn, mx = self._aabb
+        sx = (mx[0] - mn[0]) * self._scale.x
+        sy = (mx[1] - mn[1]) * self._scale.y
+        sz = (mx[2] - mn[2]) * self._scale.z
+        return sx, sy, sz
+
     def aabb_local(self): return self._aabb
 
     def align_to_floor(self):
