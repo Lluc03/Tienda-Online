@@ -3,6 +3,11 @@ import glm
 import numpy as np
 import pygame as pg
 
+# --- CACHÉS COMPARTIDAS ---
+_TEXTURE_CACHE = {}      # path -> moderngl.Texture (compartida entre instancias)
+_PROGRAM_CACHE = {}      # opcional, por si luego quieres cachear shaders
+
+
 class BaseObject:
     def __init__(self, app, shader_program=None, texture_path=None, uv_scale=(1.0, 1.0)):
         self.app = app
@@ -20,16 +25,31 @@ class BaseObject:
         self.m_model = self.get_model_matrix()
         self.on_init()
 
-    def _load_texture(self, path):
+    def _load_texture(self, path: str):
+        """
+        Carga una textura una sola vez y la comparte entre todas las instancias.
+        Devuelve moderngl.Texture.
+        """
+        tex = _TEXTURE_CACHE.get(path)
+        if tex is not None:
+            return tex
+
+        # pygame surface -> RGBA
         surf = pg.image.load(path).convert_alpha()
         w, h = surf.get_size()
-        data = pg.image.tostring(surf, 'RGBA', True)
+        # OpenGL espera datos top-to-bottom: el True hace el flip vertical
+        data = pg.image.tostring(surf, "RGBA", True)
+
         tex = self.ctx.texture((w, h), 4, data)
         tex.build_mipmaps()
         tex.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
         tex.repeat_x = True
         tex.repeat_y = True
+
+        _TEXTURE_CACHE[path] = tex
         return tex
+
+
 
     def get_model_matrix(self):
         return glm.mat4()
@@ -47,12 +67,33 @@ class BaseObject:
         self.shader_program['m_view'].write(self.app.camera.m_view)
         self.shader_program['m_model'].write(self.m_model)
 
-    def render(self, mode=mgl.TRIANGLES):
-        if self.use_texture and self.texture:
-            self.texture.use(0)
-            if 'tex0' in self.shader_program:
-                self.shader_program['tex0'].value = 0
-        self.vao.render(mode=mode)
+    def render(self):
+        """
+        Bind de textura (si hay), set del m_model y draw del VAO.
+        Asegura que el uniform u_texture_0 apunta a la unidad 0.
+        """
+        # Matriz de modelo (si el shader la tiene)
+        if hasattr(self, "get_model_matrix") and self.shader_program and "m_model" in self.shader_program:
+            self.shader_program["m_model"].write(self.get_model_matrix())
+
+        # Color por defecto cuando no hay textura (clases derivadas pueden sobrescribir)
+        if not getattr(self, "use_texture", False) and self.shader_program and "color" in self.shader_program:
+            self.shader_program["color"].value = getattr(self, "color", (1.0, 1.0, 1.0))
+
+        # Bind de textura y uniform sampler
+        if getattr(self, "use_texture", False) and self.texture is not None:
+            if "u_texture_0" in self.shader_program:
+                try:
+                    self.shader_program["u_texture_0"].value = 0
+                except Exception:
+                    # fallback por si el proxy no soporta .value
+                    self.shader_program["u_texture_0"] = 0
+            self.texture.use(location=0)
+
+        # Draw
+        if hasattr(self, "vao") and self.vao is not None:
+            self.vao.render()
+
 
     def destroy(self):
         self.vbo.release()

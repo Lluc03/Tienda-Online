@@ -1,5 +1,6 @@
 # scene_manager.py
 import glm
+import math
 from src.objects.floor import Floor
 from src.objects.wall import Wall
 from src.objects.model_obj import ModelOBJ
@@ -12,6 +13,7 @@ class SceneManager:
         self.app = app
         self.objects = []
         self.current_scene = "main"
+        self._prototype_cache = {}  # (obj_path, tex_path, target_longest)
         self.setup_scene()
     
     def render(self):
@@ -70,71 +72,89 @@ class SceneManager:
         y_clearance=0.004,
     ):
         """
-        Rellena cada balda de shelf_space con copias de un modelo.
-        - Apoya por base real (min_y_local) + y_clearance.
-        - Imprime información de footprint y uso por balda (cols/rows/skip).
+        Rellena cada balda con copias de un modelo.
+        Usa un 'prototipo' cacheado para no recargar geometría/VAO/textura.
         """
-        # plantilla del producto
-        proto = ModelOBJ(
-            self.app,
-            obj_path,
-            tex_path,
-            position=(0, 0, 0),
-            scale=(1, 1, 1),
-            rotation_deg=(0, 0, 0),
-        )
-        proto.auto_scale_by_longest_side(target_longest)
+        
+        # --- prototipo cacheado ---
+        key = (obj_path, tex_path, float(target_longest))
+        proto = self._prototype_cache.get(key)
+        if proto is None:
+            proto = ModelOBJ(
+                self.app,
+                obj_path,
+                tex_path,
+                position=(0, 0, 0),
+                scale=(1, 1, 1),
+                rotation_deg=(0, 0, 0),
+            )
+            proto.auto_scale_by_longest_side(target_longest)
+            self._prototype_cache[key] = proto
 
-        # huella y alto del AABB escalado
+        # --- AABB del prototipo ---
+        # aabb_local_sizes(): tamaños en espacio local (sin escala)
         sx, sy, sz = proto.aabb_local_sizes()
-        w = sx * proto._scale.x
-        h = sy * proto._scale.y
-        d = sz * proto._scale.z
+        # Pasar a mundo aplicando la escala actual del prototipo
+        w = sx * proto._scale.x   # ancho X
+        h = sy * proto._scale.y   # alto  Y
+        d = sz * proto._scale.z   # fondo Z
         footprint = (w, d)
+
+        # Mínimo Y local del modelo (para apoyarlo en la balda tras el escalado)
         min_y_local = proto.min_y_local()
 
-        print(f"[Fill] item footprint w={w:.3f} d={d:.3f} h={h:.3f} "
-            f"min_y_local={min_y_local:.3f} gap={gap:.3f} y_clearance={y_clearance:.3f}")
+        print(
+            f"[Fill] item footprint w={w:.3f} d={d:.3f} h={h:.3f} "
+            f"min_y_local={min_y_local:.3f} gap={gap:.3f} y_clearance={y_clearance:.3f}"
+        )
 
         spawned = []
-        import math
 
         for i, lvl in enumerate(shelf_space.get_levels()):
             y_balda = lvl["y"]
-            y_top = lvl.get("y_top")
+            y_top   = lvl.get("y_top")
 
-            # altura libre (si hay techo medido)
+            # --- headroom: comprobar holgura vertical si hay techo detectado ---
             if y_top is not None:
                 headroom = y_top - y_balda
-                needed = h + y_clearance + 0.010  # 1 cm holgura
+                needed   = h + y_clearance + 0.010  # +1 cm de seguridad
                 if headroom < needed:
-                    print(f"[Fill] skip {shelf_space.label} L{i} y={y_balda:.3f}: "
-                        f"headroom={headroom:.3f} < needed={needed:.3f}")
+                    print(
+                        f"[Fill] skip {shelf_space.label} L{i} y={y_balda:.3f}: "
+                        f"headroom={headroom:.3f} < needed={needed:.3f}"
+                    )
                     continue
 
+            # --- logs de capacidad teórica (cols/rows) solo informativos ---
             x0, x1 = lvl["x0"], lvl["x1"]
             z0, z1 = lvl["z0"], lvl["z1"]
             usable_w = max(0.0, x1 - x0)
             usable_d = max(0.0, z1 - z0)
             cols = max(0, math.floor((usable_w + gap) / (w + gap)))
             rows = max(0, math.floor((usable_d + gap) / (d + gap)))
-            print(f"[Fill] use {shelf_space.label} L{i} y={y_balda:.3f} "
+            print(
+                f"[Fill] use {shelf_space.label} L{i} y={y_balda:.3f} "
                 f"rect=({x0:.3f},{x1:.3f})x({z0:.3f},{z1:.3f}) "
-                f"usable=({usable_w:.3f},{usable_d:.3f}) -> cols={cols} rows={rows}")
-
-            poses = pack_grid_on_shelf(
-                level_rect=lvl, footprint=footprint, gap=gap, max_items=max_items_per_level
+                f"usable=({usable_w:.3f},{usable_d:.3f}) -> cols={cols} rows={rows}"
             )
+
+            # --- packing real ---
+            poses = pack_grid_on_shelf(
+                level_rect=lvl,
+                footprint=footprint,
+                gap=gap,
+                max_items=max_items_per_level,
+            )
+
             for (x, y_level, z) in poses:
                 item = proto.clone()
+                # Apoyar el modelo: trasladar por el min Y local escalado + holgura
                 y_item = y_level - (min_y_local * item._scale.y) + y_clearance
                 item.set_position((x, y_item, z))
                 spawned.append(item)
                 self.objects.append(item)
 
         return spawned
-
-
 
     def setup_scene(self):
         # Rutas (ajústalas a tu repo)

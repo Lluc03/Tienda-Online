@@ -9,7 +9,6 @@ class Floor(BaseObject):
         # Plano XZ de 10x10 (de -5 a 5) en Y=0
         # Pos (x,y,z) + UV (u,v) con tiling por uv_scale
         s, t = self.uv_scale
-        s, t = self.uv_scale
         vertices = [
             (-5, 0, -5, 0.0, 0.0),
             (5, 0, -5, s, 0.0),
