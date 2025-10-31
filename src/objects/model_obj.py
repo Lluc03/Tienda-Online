@@ -1,4 +1,3 @@
-# src/objects/model_obj.py
 from .base_object import BaseObject
 import numpy as np
 import glm

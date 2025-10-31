@@ -48,25 +48,21 @@ class SceneManager:
     def _setup_main_view(self):
         """Vista principal de la tienda"""
         print("  ↳ Vista principal: Mostrando toda la tienda")
-        # Aquí puedes ajustar cámara, iluminación, etc.
-        # Por ejemplo: self.app.camera.reset_camera()
+
     
     def _setup_products_view(self):
         """Vista enfocada en productos"""
         print("  ↳ Vista productos: Destacando catálogo")
-        # Podrías hacer zoom a productos específicos
-        # O cambiar la iluminación para resaltar productos
+
     
     def _setup_cart_view(self):
         """Vista del carrito de compras"""
         print("  ↳ Vista carrito: Mostrando items seleccionados")
-        # Podrías mostrar los productos del carrito en 3D
-        # O cambiar a una vista diferente
-    
+
     def _setup_config_view(self):
         """Vista de configuración"""
         print("  ↳ Vista configuración")
-        # Mantener la escena pero quizás cambiar UI
+
     
     def get_current_scene(self):
         """Retorna la escena actual"""
@@ -85,7 +81,15 @@ class SceneManager:
                 obj.destroy()
             except Exception as e:
                 print(f"Error liberando objeto {obj}: {e}")
-        
+
+        # Liberar prototipos (si existen)
+        for prot in self._prototype_cache.values():
+            try:
+                prot.destroy()
+            except Exception as e:
+                print(f"Error liberando prototipo: {e}")
+        self._prototype_cache.clear()
+
         # Limpiar cache de prototipos
         for proto in self._prototype_cache.values():
             try:

@@ -1,7 +1,6 @@
 import glm
 from collections import defaultdict
 from src.utils.geometry import aabb_world_from_local
-import math
 
 class ShelfSpace:
     """
