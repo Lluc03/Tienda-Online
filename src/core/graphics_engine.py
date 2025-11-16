@@ -20,6 +20,7 @@ class GraphicsEngine:
         self.camera = Camera(self)
         self.scene_manager = SceneManager(self)
         self.ui_manager = UIManager(self.WIN_SIZE)
+        self.view_mode = "third"
         
 
         # Referencia al avatar controlable (si la escena lo define)
@@ -199,9 +200,10 @@ class GraphicsEngine:
     def handle_events(self, events, time_delta):
         """Procesa eventos de pygame - VERSIÓN CORREGIDA"""
         for event in events:
-            # ✅ SOLUCIÓN: Procesar eventos de UI primero
+            # 1. Eventos de UI primero
             self.ui_manager.handle_ui_events(event)
             
+            # 2. Eventos globales
             if event.type == pg.QUIT:
                 self.cleanup()
                 pg.quit()
@@ -215,30 +217,43 @@ class GraphicsEngine:
                     self.cleanup()
                     pg.quit()
                     sys.exit()
+                elif event.key == pg.K_v:
+                    # Cambiar entre primera y tercera persona
+                    self.toggle_view_mode()
 
+            # 3. Ratón
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Click izquierdo
-                    if not self.ui_manager.is_hovering_ui():
+                    # SOLO en tercera persona activamos control de cámara con ratón
+                    if self.view_mode == "third" and not self.ui_manager.is_hovering_ui():
                         self.left_mouse_pressed = True
                         self.camera.first_mouse = True
                         pg.mouse.set_visible(False)
                         pg.event.set_grab(True)
                         print("✓ Control de cámara activado")
+                    # En primera persona dejamos el ratón libre (más adelante: selección de objetos)
+
                 elif event.button == 3:  # Click derecho
                     if not self.ui_manager.is_hovering_ui():
                         self.ui_manager.menu_gui.create_context_menu(event.pos)
                         print(f"✓ Menú contextual en: {event.pos}")
 
             elif event.type == pg.MOUSEBUTTONUP:
-                if event.button == 1:
+                if event.button == 1 and self.view_mode == "third":
                     self.left_mouse_pressed = False
                     pg.mouse.set_visible(True)
                     pg.event.set_grab(False)
                     print("✓ Control de cámara desactivado")
 
             elif event.type == pg.MOUSEMOTION:
-                if self.left_mouse_pressed and not self.ui_manager.is_hovering_ui():
+                # SOLO en tercera persona usamos el ratón para rotar la cámara
+                if (
+                    self.view_mode == "third"
+                    and self.left_mouse_pressed
+                    and not self.ui_manager.is_hovering_ui()
+                ):
                     self.handle_mouse_movement(event)
+
 
     def handle_mouse_movement(self, event):
         """Procesa el movimiento del ratón para la cámara"""
@@ -254,11 +269,16 @@ class GraphicsEngine:
         self.camera.process_mouse_movement(x_offset, y_offset)
 
     def handle_keyboard_input(self):
-        """Procesa input de teclado continuo para mover el AVATAR, no la cámara."""
+        """Procesa input de teclado continuo.
+
+        - Modo 'third': mueve la CÁMARA (modo dios, como antes).
+        - Modo 'first': mueve el AVATAR y rota cámara/avata con teclas.
+        """
         keys = pg.key.get_pressed()
 
-        # Si no hay avatar definido, fallback al comportamiento antiguo (mover cámara)
-        if not getattr(self, "avatar", None):
+        # --- MODO DIOS / TERCERA PERSONA: mover solo la cámara ---
+        # (también se usa si aún no hay avatar cargado)
+        if not getattr(self, "avatar", None) or self.view_mode == "third":
             if keys[pg.K_UP] or keys[pg.K_w]:
                 self.camera.move_forward()
             if keys[pg.K_DOWN] or keys[pg.K_s]:
@@ -267,13 +287,16 @@ class GraphicsEngine:
                 self.camera.move_left()
             if keys[pg.K_RIGHT] or keys[pg.K_d]:
                 self.camera.move_right()
-            if keys[pg.K_SPACE] or keys[pg.K_q]:
-                self.camera.move_up()
-            if keys[pg.K_LSHIFT] or keys[pg.K_e]:
-                self.camera.move_down()
-            return
 
-        # --- MODO AGENTE: mover avatar según la dirección de la cámara ---
+            # Volar con Q/E (y opcionalmente Space/Shift)
+            if keys[pg.K_q] or keys[pg.K_SPACE]:
+                self.camera.move_up()
+            if keys[pg.K_e] or keys[pg.K_LSHIFT]:
+                self.camera.move_down()
+
+            return  # No hacemos nada con el avatar en este modo
+
+        # --- MODO PRIMERA PERSONA: mover AVATAR según la dirección de la cámara ---
         move_vec = glm.vec3(0.0, 0.0, 0.0)
         speed = self.camera.move_speed  # reutilizamos la misma velocidad
 
@@ -286,7 +309,7 @@ class GraphicsEngine:
         if glm.length(right) > 0:
             right = glm.normalize(right)
 
-        # Movimiento en XZ según WASD
+        # Movimiento en XZ según WASD o flechas
         if keys[pg.K_UP] or keys[pg.K_w]:
             move_vec += forward * speed
         if keys[pg.K_DOWN] or keys[pg.K_s]:
@@ -296,57 +319,141 @@ class GraphicsEngine:
         if keys[pg.K_RIGHT] or keys[pg.K_d]:
             move_vec += right * speed
 
-        # subir/bajar avatar con Q/E/Space/Shift 
-        if keys[pg.K_SPACE] or keys[pg.K_q]:
-            move_vec.y += speed
-        if keys[pg.K_LSHIFT] or keys[pg.K_e]:
-            move_vec.y -= speed
-
         # Aplicar movimiento al avatar usando SceneManager.try_move (con colisiones)
         if glm.length(move_vec) > 0:
             self.scene_manager.try_move(self.avatar, move_vec)
 
+        # --- Rotación horizontal (yaw) del avatar/cámara con Q/E ---
+        yaw_speed = 1.5  # grados por frame
+        rotated = False
+
+        if keys[pg.K_q]:
+            self.camera.yaw -= yaw_speed
+            rotated = True
+        if keys[pg.K_e]:
+            self.camera.yaw += yaw_speed
+            rotated = True
+
+        # --- Mirar arriba/abajo (pitch) con O/P ---
+        pitch_speed = 1.5
+        pitched = False
+
+        if keys[pg.K_o]:  # mirar hacia ARRIBA
+            self.camera.pitch += pitch_speed
+            pitched = True
+        if keys[pg.K_p]:  # mirar hacia ABAJO
+            self.camera.pitch -= pitch_speed
+            pitched = True
+
+        if rotated or pitched:
+            # Clampear pitch igual que en process_mouse_movement
+            max_pitch = 89.0   # casi mirar al cielo
+            min_pitch = -20.0  # solo unos pocos grados hacia abajo
+
+            if self.camera.pitch > max_pitch:
+                self.camera.pitch = max_pitch
+            if self.camera.pitch < min_pitch:
+                self.camera.pitch = min_pitch
+
+            self.camera.update_camera_vectors()
+
         # Mantener al avatar orientado con la cámara (solo yaw)
         self.avatar.set_rotation((0.0, self.camera.yaw, 0.0))
 
-    
+
     def update_camera_from_avatar(self):
         """
-        Cámara en tercera persona:
-        - Siempre detrás del avatar según la dirección de la cámara.
-        - Un poco por encima.
+        Sincroniza la cámara con el avatar SOLO en primera persona.
+
+        - Modo 'first': cámara en la "cabeza" del avatar, ligeramente adelantada.
+        - Modo 'third': no tocamos la cámara (modo dios).
         """
         if not getattr(self, "avatar", None):
             return
 
+        # En tercera persona no tocamos nada: la cámara la mueve el usuario
+        if self.view_mode != "first":
+            return
+
         avatar_pos = self.avatar.get_position()
 
-        # Altura de "cuerpo" donde queremos el centro de cámara encima del avatar
+        # Altura aproximada de los ojos
         eye_height = 1.2
-        # Distancia de la cámara detrás del avatar
-        distance = 3.0
 
-        # Dirección de avance basada en la orientación actual de la cámara (yaw/pitch),
-        # pero proyectada en el plano XZ (no queremos que la cámara se hunda o suba por pitch)
-        forward = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
-        if glm.length(forward) == 0:
-            forward = glm.vec3(0.0, 0.0, -1.0)
-        forward = glm.normalize(forward)
-
-        # Punto "target" sobre el avatar (a la altura del cuerpo/cabeza)
-        target = glm.vec3(
+        # Posición base de la cabeza
+        head_pos = glm.vec3(
             avatar_pos.x,
             avatar_pos.y + eye_height,
             avatar_pos.z
         )
 
-        # Colocamos la cámara DISTANCIA metros detrás del avatar y un pelín más arriba
-        cam_pos = target - forward * distance + glm.vec3(0.0, 0.5, 0.0)
+        # Offset hacia delante para no estar dentro del paralelepípedo
+        forward_flat = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
+        if glm.length(forward_flat) > 0:
+            forward_flat = glm.normalize(forward_flat)
+        else:
+            forward_flat = glm.vec3(0.0, 0.0, -1.0)
 
-        self.camera.position = cam_pos
-        # Recalculamos la view matrix con la NUEVA posición
+        # Unos 20 cm por delante del cuerpo
+        offset = forward_flat * 0.2
+
+        self.camera.position = head_pos + offset
         self.camera.update_view_matrix()
 
+
+    def toggle_view_mode(self):
+        """Alterna entre vista en tercera persona y primera persona."""
+        if self.view_mode == "third":
+            self.view_mode = "first"
+            # Al entrar en primera persona, orientar el avatar con la cámara
+            if getattr(self, "avatar", None):
+                self.avatar.set_rotation((0.0, self.camera.yaw, 0.0))
+        else:
+            self.view_mode = "third"
+
+        modo = "Primera persona" if self.view_mode == "first" else "Tercera persona"
+        print(f"🔁 Modo de cámara cambiado a: {modo}")
+
+
+    
+    def update_camera_from_avatar(self):
+        """
+        Sincroniza la cámara con el avatar SOLO en primera persona.
+
+        - Modo 'first': cámara en la "cabeza" del avatar, ligeramente adelantada.
+        - Modo 'third': no tocamos la cámara (modo dios).
+        """
+        if not getattr(self, "avatar", None):
+            return
+
+        # En tercera persona no tocamos nada: la cámara la mueve el usuario
+        if self.view_mode != "first":
+            return
+
+        avatar_pos = self.avatar.get_position()
+
+        # Altura aproximada de los ojos
+        eye_height = 1.2
+
+        # Posición base de la cabeza
+        head_pos = glm.vec3(
+            avatar_pos.x,
+            avatar_pos.y + eye_height,
+            avatar_pos.z
+        )
+
+        # Offset hacia delante para no estar dentro del paralelepípedo
+        forward_flat = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
+        if glm.length(forward_flat) > 0:
+            forward_flat = glm.normalize(forward_flat)
+        else:
+            forward_flat = glm.vec3(0.0, 0.0, -1.0)
+
+        # Unos 20 cm por delante del cuerpo
+        offset = forward_flat * 0.2
+
+        self.camera.position = head_pos + offset
+        self.camera.update_view_matrix()
 
 
     def render_gui(self):

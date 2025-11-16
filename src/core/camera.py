@@ -76,12 +76,16 @@ class Camera:
         self.yaw += x_offset
         self.pitch += y_offset
         
-        # Limit pitch to prevent camera flipping
+               # Limit pitch to prevent camera flipping
         if constrain_pitch:
-            if self.pitch > 89.0:
-                self.pitch = 89.0
-            if self.pitch < -89.0:
-                self.pitch = -89.0
+            max_pitch = 89.0   # casi mirar al cielo
+            min_pitch = -20.0  # solo unos pocos grados hacia abajo
+
+            if self.pitch > max_pitch:
+                self.pitch = max_pitch
+            if self.pitch < min_pitch:
+                self.pitch = min_pitch
+
         
         self.update_camera_vectors()
         self.update_view_matrix()
