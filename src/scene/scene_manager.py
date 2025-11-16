@@ -7,6 +7,7 @@ from src.placement.shelf_space import ShelfSpace
 from src.placement.placer import pack_grid_on_shelf
 
 
+
 class SceneManager:
     def __init__(self, app):
         self.app = app
@@ -320,6 +321,28 @@ class SceneManager:
                 max_items_per_level=None,
                 y_clearance=0.004,
             )
-        
+
+        # --- AVATAR CONTROLABLE (AGENTE) ---
+        avatar_model = "assets/models/Avatar0.obj"
+
+        self.avatar = ModelOBJ(
+            self.app,
+            avatar_model,
+            texture_path=None,            #SIN textura
+            position=(0.0, 0.0, 0.0),
+            scale=(1.0, 1.0, 1.0),
+            rotation_deg=(0.0, 0.0, 0.0)
+        )
+
+        self.avatar.auto_scale_by_longest_side(1.7)
+        self.avatar.align_to_floor()
+
+        # Color plano para el avatar (shader sin textura)
+        self.avatar.color = (0.2, 0.2, 0.8)  # azul, por ejemplo
+
+        self.objects.append(self.avatar)
+
+
         print(f"✅ Escena construida: {len(self.objects)} objetos totales")
         print(f"   └─ Objetos principales: {len(self.scene_objects['main'])}")
+

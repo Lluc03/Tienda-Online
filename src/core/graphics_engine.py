@@ -2,6 +2,7 @@ import pygame as pg
 import numpy as np
 import moderngl as mgl
 import sys
+import glm
 from .camera import Camera
 from src.gui.ui_manager import UIManager
 from src.scene.scene_manager import SceneManager
@@ -19,6 +20,18 @@ class GraphicsEngine:
         self.scene_manager = SceneManager(self)
         self.ui_manager = UIManager(self.WIN_SIZE)
         
+
+        # Referencia al avatar controlable (si la escena lo define)
+        self.avatar = getattr(self.scene_manager, "avatar", None)
+
+        # Si hay avatar, inicializar cámara enganchada a él
+        if self.avatar is not None:
+            try:
+                self.update_camera_from_avatar()
+            except Exception:
+                pass
+
+
         # Configurar callbacks de UI
         self._setup_ui_callbacks()
         
@@ -240,20 +253,103 @@ class GraphicsEngine:
         self.camera.process_mouse_movement(x_offset, y_offset)
 
     def handle_keyboard_input(self):
-        """Procesa input de teclado continuo para movimiento de cámara"""
+        """Procesa input de teclado continuo para mover el AVATAR, no la cámara."""
         keys = pg.key.get_pressed()
+
+        # Si no hay avatar definido, fallback al comportamiento antiguo (mover cámara)
+        if not getattr(self, "avatar", None):
+            if keys[pg.K_UP] or keys[pg.K_w]:
+                self.camera.move_forward()
+            if keys[pg.K_DOWN] or keys[pg.K_s]:
+                self.camera.move_backward()
+            if keys[pg.K_LEFT] or keys[pg.K_a]:
+                self.camera.move_left()
+            if keys[pg.K_RIGHT] or keys[pg.K_d]:
+                self.camera.move_right()
+            if keys[pg.K_SPACE] or keys[pg.K_q]:
+                self.camera.move_up()
+            if keys[pg.K_LSHIFT] or keys[pg.K_e]:
+                self.camera.move_down()
+            return
+
+        # --- MODO AGENTE: mover avatar según la dirección de la cámara ---
+        move_vec = glm.vec3(0.0, 0.0, 0.0)
+        speed = self.camera.move_speed  # reutilizamos la misma velocidad
+
+        # Vectores forward/right "planos" (sin componente vertical)
+        forward = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
+        right = glm.vec3(self.camera.right.x, 0.0, self.camera.right.z)
+
+        if glm.length(forward) > 0:
+            forward = glm.normalize(forward)
+        if glm.length(right) > 0:
+            right = glm.normalize(right)
+
+        # Movimiento en XZ según WASD
         if keys[pg.K_UP] or keys[pg.K_w]:
-            self.camera.move_forward()
+            move_vec += forward * speed
         if keys[pg.K_DOWN] or keys[pg.K_s]:
-            self.camera.move_backward()
+            move_vec -= forward * speed
         if keys[pg.K_LEFT] or keys[pg.K_a]:
-            self.camera.move_left()
+            move_vec -= right * speed
         if keys[pg.K_RIGHT] or keys[pg.K_d]:
-            self.camera.move_right()
+            move_vec += right * speed
+
+        # subir/bajar avatar con Q/E/Space/Shift 
         if keys[pg.K_SPACE] or keys[pg.K_q]:
-            self.camera.move_up()
+            move_vec.y += speed
         if keys[pg.K_LSHIFT] or keys[pg.K_e]:
-            self.camera.move_down()
+            move_vec.y -= speed
+
+        # Aplicar movimiento al avatar
+        if glm.length(move_vec) > 0:
+            pos = self.avatar.get_position()
+            new_pos = pos + move_vec
+            self.avatar.set_position((new_pos.x, new_pos.y, new_pos.z))
+
+        # Mantener al avatar orientado con la cámara (solo yaw)
+        # (opcional pero queda más lógico)
+        self.avatar.set_rotation((0.0, self.camera.yaw, 0.0))
+
+    
+    def update_camera_from_avatar(self):
+        """
+        Cámara en tercera persona:
+        - Siempre detrás del avatar según la dirección de la cámara.
+        - Un poco por encima.
+        """
+        if not getattr(self, "avatar", None):
+            return
+
+        avatar_pos = self.avatar.get_position()
+
+        # Altura de "cuerpo" donde queremos el centro de cámara encima del avatar
+        eye_height = 1.2
+        # Distancia de la cámara detrás del avatar
+        distance = 3.0
+
+        # Dirección de avance basada en la orientación actual de la cámara (yaw/pitch),
+        # pero proyectada en el plano XZ (no queremos que la cámara se hunda o suba por pitch)
+        forward = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
+        if glm.length(forward) == 0:
+            forward = glm.vec3(0.0, 0.0, -1.0)
+        forward = glm.normalize(forward)
+
+        # Punto "target" sobre el avatar (a la altura del cuerpo/cabeza)
+        target = glm.vec3(
+            avatar_pos.x,
+            avatar_pos.y + eye_height,
+            avatar_pos.z
+        )
+
+        # Colocamos la cámara DISTANCIA metros detrás del avatar y un pelín más arriba
+        cam_pos = target - forward * distance + glm.vec3(0.0, 0.5, 0.0)
+
+        self.camera.position = cam_pos
+        # Recalculamos la view matrix con la NUEVA posición
+        self.camera.update_view_matrix()
+
+
 
     def render_gui(self):
         """Renderiza la GUI sobre OpenGL"""
@@ -311,23 +407,23 @@ class GraphicsEngine:
         print("🎯 Los botones deberían funcionar ahora correctamente")
 
         while True:
-            # ✅ CORRECCIÓN: Calcular time_delta primero
+            # 1. delta de tiempo
             time_delta = self.clock.tick(60) / 1000.0
             events = self.get_events()
             
-            # ✅ CORRECCIÓN: Orden correcto de procesamiento
-            # 1. Procesar eventos con pygame_gui PRIMERO
+            # 2. UI primero
             for event in events:
                 self.ui_manager.ui_manager.process_events(event)
-            
-            # 2. Actualizar UI con time_delta
             self.ui_manager.ui_manager.update(time_delta)
             
-            # 3. Manejar eventos personalizados (pasar time_delta)
+            # 3. Eventos propios (cámara, menús, etc.)
             self.handle_events(events, time_delta)
             
-            # 4. Input de teclado continuo
+            # 4. Input de teclado continuo (MUEVE AVATAR)
             self.handle_keyboard_input()
+
+            # 4.5. Enganchar cámara al avatar (posición)
+            self.update_camera_from_avatar()
             
-            # 5. Renderizar
+            # 5. Renderizar escena + UI
             self.render()

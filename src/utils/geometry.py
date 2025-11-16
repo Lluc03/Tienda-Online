@@ -1,4 +1,3 @@
-# src/utils/geometry.py
 import glm
 
 def aabb_world_from_local(local_min, local_max, model_matrix):

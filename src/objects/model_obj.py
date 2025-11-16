@@ -39,35 +39,55 @@ class ModelOBJ(BaseObject):
     def set_position(self, xyz): self._position = glm.vec3(*xyz)
     def set_scale(self, xyz):    self._scale    = glm.vec3(*xyz)
     def set_rotation(self, deg): self._rotation = glm.vec3(*deg)
+    def get_position(self): return self._position
+
 
     # ---------- Geometría ----------
 
+    # ---------- Geometría ----------
     def get_vertex_data(self):
-        # -- Intentar leer de caché de geometría --
-        if self.obj_path in _GEOM_CACHE:
-            vb, mn, mx = _GEOM_CACHE[self.obj_path]
+        """
+        Genera los datos de vértices del OBJ.
+        - Si self.use_texture == True  -> (x, y, z, u, v)  (5 floats)
+        - Si self.use_texture == False -> (x, y, z)        (3 floats, sin UV)
+        El caché se separa por (obj_path, use_texture) para evitar mezclar formatos.
+        """
+        # --- clave de caché diferenciando si usamos textura o no ---
+        use_tex = bool(getattr(self, "use_texture", False))
+        cache_key = (self.obj_path, use_tex)
+
+        # Intentar leer de caché de geometría
+        if cache_key in _GEOM_CACHE:
+            vb, mn, mx = _GEOM_CACHE[cache_key]
             self._aabb = (mn, mx)
-            # Recuperar posiciones/triángulos si ya existen en caché auxiliar
+            # Recuperar posiciones/triángulos (comparten clave solo por path, da igual UV)
             extra = _TRI_CACHE.get(self.obj_path)
             if extra:
-                self._raw_positions = extra.get('positions')
-                self._triangles_idx = extra.get('tri_idx')
-            print(f"[ModelOBJ] cache '{self.obj_path}': {len(vb)//20} verts, AABB {mn}..{mx}")
+                self._raw_positions = extra.get("positions")
+                self._triangles_idx = extra.get("tri_idx")
+            print(
+                f"[ModelOBJ] cache '{self.obj_path}' use_tex={use_tex}: "
+                f"{len(vb) // (20 if use_tex else 12)} verts, AABB {mn}..{mx}"
+            )
             return vb
 
-        positions, texcoords = [], []
-        stream = []
-        tri_idx = []  # lista de (i0,i1,i2) en índices de positions
+        positions = []
+        texcoords = []
+        faces = []      # cada cara: lista de (vi, ti) en indices de positions/texcoords
+        tri_idx = []    # lista de triángulos en índices de positions
 
+        # --- parseo del OBJ ---
         try:
-            with open(self.obj_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.obj_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
-                    if line.startswith('v '):
+
+                    if line.startswith("v "):
                         _, x, y, z = line.strip().split()[:4]
                         positions.append((float(x), float(y), float(z)))
-                    elif line.startswith('vt '):
+
+                    elif line.startswith("vt "):
                         parts = line.strip().split()
                         if len(parts) >= 3:
                             _, u, v = parts[:3]
@@ -75,51 +95,73 @@ class ModelOBJ(BaseObject):
                             if self._invert_v:
                                 v = 1.0 - v
                             texcoords.append((u, v))
-                    elif line.startswith('f '):
+
+                    elif line.startswith("f "):
                         items = line.strip().split()[1:]
                         idx = []
                         for it in items:
-                            a = it.split('/')
+                            a = it.split("/")
                             vi = int(a[0])
-                            ti = int(a[1]) if len(a) > 1 and a[1] != '' else 0
-                            if vi < 0: vi = len(positions) + vi + 1
-                            if ti < 0: ti = len(texcoords) + ti + 1
+                            ti = int(a[1]) if len(a) > 1 and a[1] != "" else 0
+                            if vi < 0:
+                                vi = len(positions) + vi + 1
+                            if ti < 0:
+                                ti = len(texcoords) + ti + 1
                             idx.append((vi - 1, ti - 1))
-                        # Triangulación tipo fan
-                        for i in range(1, len(idx) - 1):
-                            fan = (0, i, i + 1)
-                            # Guardar triángulo de índices (en positions)
-                            tri_idx.append((idx[fan[0]][0], idx[fan[1]][0], idx[fan[2]][0]))
-                            # Volcar al stream intercalado pos+uv
-                            for k in fan:
-                                vi, ti = idx[k]
-                                x, y, z = positions[vi]
-                                if 0 <= ti < len(texcoords):
-                                    u, v = texcoords[ti]
-                                else:
-                                    u, v = 0.0, 0.0
-                                stream.extend([x, y, z, u, v])
+                        faces.append(idx)
         except Exception as e:
             raise RuntimeError(f"Error leyendo OBJ '{self.obj_path}': {e}")
 
-        if not stream:
+        if not positions:
             raise RuntimeError(f"OBJ '{self.obj_path}' sin datos de geometría.")
 
-        xs = [p[0] for p in positions] or [0.0]
-        ys = [p[1] for p in positions] or [0.0]
-        zs = [p[2] for p in positions] or [0.0]
+        # --- construir stream y triángulos con triangulación tipo fan ---
+        stream = []
+        for idx in faces:
+            if len(idx) < 3:
+                continue
+            # fan: (0,i,i+1)
+            for i in range(1, len(idx) - 1):
+                fan = (0, i, i + 1)
+                v_indices = []
+                for k in fan:
+                    vi, ti = idx[k]
+                    v_indices.append(vi)
+                    x, y, z = positions[vi]
+
+                    if use_tex and 0 <= ti < len(texcoords):
+                        u, v = texcoords[ti]
+                        stream.extend([x, y, z, u, v])
+                    else:
+                        stream.extend([x, y, z])
+                # guardar triángulo en índices de positions
+                tri_idx.append((v_indices[0], v_indices[1], v_indices[2]))
+
+        if not stream:
+            raise RuntimeError(f"OBJ '{self.obj_path}' sin triángulos válidos.")
+
+        # --- AABB local ---
+        xs = [p[0] for p in positions]
+        ys = [p[1] for p in positions]
+        zs = [p[2] for p in positions]
         mn = (min(xs), min(ys), min(zs))
         mx = (max(xs), max(ys), max(zs))
         self._aabb = (mn, mx)
 
-        # Guardar datos locales para detectar baldas
+        # Guardar datos locales para ShelfSpace / colisiones
         self._raw_positions = positions
         self._triangles_idx = tri_idx
-        _TRI_CACHE[self.obj_path] = {'positions': positions, 'tri_idx': tri_idx}
+        _TRI_CACHE[self.obj_path] = {"positions": positions, "tri_idx": tri_idx}
 
-        vb = np.array(stream, dtype='f4').tobytes()
-        _GEOM_CACHE[self.obj_path] = (vb, mn, mx)
-        print(f"[ModelOBJ] loaded(fallback) '{self.obj_path}': {len(stream)//5} verts, AABB {mn}..{mx}")
+        # --- empaquetar a bytes ---
+        import numpy as np
+        vb = np.array(stream, dtype="f4").tobytes()
+        _GEOM_CACHE[cache_key] = (vb, mn, mx)
+
+        print(
+            f"[ModelOBJ] loaded '{self.obj_path}' use_tex={use_tex}: "
+            f"{len(stream) // (5 if use_tex else 3)} verts, AABB {mn}..{mx}"
+        )
         return vb
 
     
