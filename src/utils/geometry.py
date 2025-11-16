@@ -22,3 +22,20 @@ def aabb_world_from_local(local_min, local_max, model_matrix):
     max_w = glm.vec3(max(p.x for p in world), max(p.y for p in world), max(p.z for p in world))
     return (min_w.x, min_w.y, min_w.z), (max_w.x, max_w.y, max_w.z)
 
+def aabb_overlap_3d(a_min, a_max, b_min, b_max, eps=1e-6):
+    """Comprueba solape de dos AABB 3D.
+    Cada parámetro es una tupla (x, y, z) con min y max en cada eje.
+    """
+    ax0, ay0, az0 = a_min
+    ax1, ay1, az1 = a_max
+    bx0, by0, bz0 = b_min
+    bx1, by1, bz1 = b_max
+
+    no_overlap = (
+        ax1 <= bx0 + eps or bx1 <= ax0 + eps or
+        ay1 <= by0 + eps or by1 <= ay0 + eps or
+        az1 <= bz0 + eps or bz1 <= az0 + eps
+    )
+    return not no_overlap
+
+

@@ -5,6 +5,7 @@ from src.objects.wall import Wall
 from src.objects.model_obj import ModelOBJ
 from src.placement.shelf_space import ShelfSpace
 from src.placement.placer import pack_grid_on_shelf
+from src.utils.geometry import aabb_world_from_local
 
 
 
@@ -24,7 +25,35 @@ class SceneManager:
         }
         
         self.shelf_spaces = []
+        self.static_colliders = []
         self.setup_scene()
+    
+    def rebuild_static_colliders(self):
+        """Reconstruye la lista de colliders estáticos (paredes, estanterías, productos...)."""
+        self.static_colliders = []
+
+        avatar = getattr(self, "avatar", None)
+
+        # 1) Paredes: usamos un AABB local con un pequeño grosor en Z
+        #    para obtener un volumen contra el que colisionar.
+        wall_local_min = (-0.5, -0.5, -0.05)
+        wall_local_max = (0.5,  0.5,  0.05)
+        for wall in getattr(self, "walls", []):
+            wmin, wmax = aabb_world_from_local(wall_local_min, wall_local_max, wall.get_model_matrix())
+            self.static_colliders.append((glm.vec3(*wmin), glm.vec3(*wmax)))
+
+        # 2) Cualquier ModelOBJ estático (estanterías, productos, etc.) excepto el avatar
+        for obj in self.objects:
+            if isinstance(obj, ModelOBJ) and obj is not avatar:
+                local = getattr(obj, "aabb_local", None)
+                if callable(local):
+                    local = obj.aabb_local()
+                if not local:
+                    continue
+                local_min, local_max = local
+                wmin, wmax = aabb_world_from_local(local_min, local_max, obj.get_model_matrix())
+                self.static_colliders.append((glm.vec3(*wmin), glm.vec3(*wmax)))
+
     
     def set_scene(self, scene_name):
         """
@@ -336,12 +365,9 @@ class SceneManager:
 
         self.avatar.auto_scale_by_longest_side(1.7)
         self.avatar.align_to_floor()
-
-        # Color plano para el avatar (shader sin textura)
-        self.avatar.color = (0.2, 0.2, 0.8)  # azul, por ejemplo
-
+        self.avatar.color = (0.2, 0.2, 0.8)  # azul
         self.objects.append(self.avatar)
-
+        self.rebuild_static_colliders()
 
         print(f"✅ Escena construida: {len(self.objects)} objetos totales")
         print(f"   └─ Objetos principales: {len(self.scene_objects['main'])}")
