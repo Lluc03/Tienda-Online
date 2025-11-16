@@ -6,7 +6,7 @@ import glm
 from .camera import Camera
 from src.gui.ui_manager import UIManager
 from src.scene.scene_manager import SceneManager
-from src.utils.geometry import aabb_world_from_local, aabb_overlap_3d
+
 
 class GraphicsEngine:
     def __init__(self):
@@ -302,63 +302,12 @@ class GraphicsEngine:
         if keys[pg.K_LSHIFT] or keys[pg.K_e]:
             move_vec.y -= speed
 
-        # Aplicar movimiento al avatar con comprobación de colisiones
+        # Aplicar movimiento al avatar usando SceneManager.try_move (con colisiones)
         if glm.length(move_vec) > 0:
-            old_pos = self.avatar.get_position()
-            new_pos = old_pos + move_vec
-
-            # Mantener al avatar sobre el suelo básico (no permitir y < 0)
-            if new_pos.y < 0.0:
-                new_pos.y = 0.0
-
-            # Probar movimiento en la escena
-            self.avatar.set_position((new_pos.x, new_pos.y, new_pos.z))
-
-            # Si colisiona con algún objeto estático, revertimos
-            if self._avatar_collides():
-                self.avatar.set_position((old_pos.x, old_pos.y, old_pos.z))
+            self.scene_manager.try_move(self.avatar, move_vec)
 
         # Mantener al avatar orientado con la cámara (solo yaw)
         self.avatar.set_rotation((0.0, self.camera.yaw, 0.0))
-
-    
-    def _get_avatar_aabb_world(self):
-        """Devuelve el AABB en coordenadas de mundo del avatar actual."""
-        avatar = getattr(self, "avatar", None)
-        if not avatar or not hasattr(avatar, "aabb_local"):
-            return None
-
-        local = avatar.aabb_local()
-        if not local:
-            return None
-
-        local_min, local_max = local
-        wmin_t, wmax_t = aabb_world_from_local(local_min, local_max, avatar.get_model_matrix())
-
-        wmin = glm.vec3(*wmin_t)
-        wmax = glm.vec3(*wmax_t)
-
-        return (wmin, wmax)
-
-
-    def _avatar_collides(self):
-        """Comprueba si el avatar colisiona con algún collider estático de la escena."""
-        aabb = self._get_avatar_aabb_world()
-        if aabb is None:
-            return False
-
-        a_min_vec, a_max_vec = aabb
-        a_min = (a_min_vec.x, a_min_vec.y, a_min_vec.z)
-        a_max = (a_max_vec.x, a_max_vec.y, a_max_vec.z)
-
-        colliders = getattr(self.scene_manager, "static_colliders", [])
-        for b_min_vec, b_max_vec in colliders:
-            b_min = (b_min_vec.x, b_min_vec.y, b_min_vec.z)
-            b_max = (b_max_vec.x, b_max_vec.y, b_max_vec.z)
-            if aabb_overlap_3d(a_min, a_max, b_min, b_max):
-                return True
-
-        return False
 
     
     def update_camera_from_avatar(self):

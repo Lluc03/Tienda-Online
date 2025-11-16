@@ -5,7 +5,7 @@ from src.objects.wall import Wall
 from src.objects.model_obj import ModelOBJ
 from src.placement.shelf_space import ShelfSpace
 from src.placement.placer import pack_grid_on_shelf
-from src.utils.geometry import aabb_world_from_local
+from src.utils.geometry import aabb_world_from_local, aabb_overlap_3d
 
 
 
@@ -53,6 +53,74 @@ class SceneManager:
                 local_min, local_max = local
                 wmin, wmax = aabb_world_from_local(local_min, local_max, obj.get_model_matrix())
                 self.static_colliders.append((glm.vec3(*wmin), glm.vec3(*wmax)))
+    
+    def get_entity_aabb_world(self, entity):
+        """Devuelve el AABB del 'entity' en coordenadas de mundo, o None si no tiene."""
+        local_fn = getattr(entity, "aabb_local", None)
+        if not callable(local_fn):
+            return None
+
+        local = local_fn()
+        if not local:
+            return None
+
+        local_min, local_max = local
+        wmin, wmax = aabb_world_from_local(local_min, local_max, entity.get_model_matrix())
+        # aabb_world_from_local devuelve tuplas (x, y, z)
+        return wmin, wmax
+
+    def try_move(self, entity, delta, keep_on_ground=True):
+        """Intenta mover 'entity' por 'delta'. Devuelve True si el movimiento es válido.
+
+        - Aplica el desplazamiento.
+        - Comprueba colisión contra self.static_colliders.
+        - Si hay colisión, revierte el movimiento y devuelve False.
+        """
+        if delta is None:
+            return True
+
+        # Asegurarnos de que delta es un glm.vec3
+        if isinstance(delta, tuple):
+            delta = glm.vec3(*delta)
+
+        if glm.length(delta) == 0:
+            return True
+
+        # Comprobamos que la entidad tiene interfaz de movimiento tipo ModelOBJ
+        if not hasattr(entity, "get_position") or not hasattr(entity, "set_position"):
+            return False
+
+        # Guardar posición original
+        old_pos = entity.get_position()
+        new_pos = old_pos + delta
+
+        # Mantener en el suelo básico si se indica
+        if keep_on_ground and new_pos.y < 0.0:
+            new_pos.y = 0.0
+
+        # Aplicar posición tentativa
+        entity.set_position((new_pos.x, new_pos.y, new_pos.z))
+
+        # Obtener el AABB en mundo de la entidad
+        aabb = self.get_entity_aabb_world(entity)
+        if aabb is None:
+            # Si no hay AABB, aceptamos el movimiento tal cual
+            return True
+
+        a_min = aabb[0]  # tupla (x, y, z)
+        a_max = aabb[1]
+
+        # Comprobar colisión con todos los colliders estáticos
+        for b_min_vec, b_max_vec in self.static_colliders:
+            b_min = (b_min_vec.x, b_min_vec.y, b_min_vec.z)
+            b_max = (b_max_vec.x, b_max_vec.y, b_max_vec.z)
+            if aabb_overlap_3d(a_min, a_max, b_min, b_max):
+                # Revertir movimiento y avisar
+                entity.set_position((old_pos.x, old_pos.y, old_pos.z))
+                return False
+
+        return True
+
 
     
     def set_scene(self, scene_name):
