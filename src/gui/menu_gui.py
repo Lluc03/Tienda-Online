@@ -95,28 +95,32 @@ class MenuGUI:
         # TextBox con el contenido del carrito (se actualizará dinámicamente)
         self.cart_textbox = UITextBox(
             relative_rect=pg.Rect(10, 10, 380, 220),
-            html_text="<b>Tu carrito está vacío</b><br>Agrega productos desde el catálogo",
+            html_text="<b>Tu carrito está vacío</b>",
             manager=self.ui_manager,
             container=self.cart_menu,
             object_id='#cart_content'
         )
 
-        # Botones +/- para manzana (producto único por ahora)
+        # Botones +/- pequeños junto a la línea del producto
+        self.btn_remove_apple = UIButton(
+            relative_rect=pg.Rect(250, 40, 30, 30),
+            text='−',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_remove_apple'
+        )
+
         self.btn_add_apple = UIButton(
-            relative_rect=pg.Rect(10, 240, 185, 35),
-            text='➕ Añadir manzana',
+            relative_rect=pg.Rect(290, 40, 30, 30),
+            text='+',
             manager=self.ui_manager,
             container=self.cart_menu,
             object_id='#btn_add_apple'
         )
 
-        self.btn_remove_apple = UIButton(
-            relative_rect=pg.Rect(205, 240, 185, 35),
-            text='➖ Quitar manzana',
-            manager=self.ui_manager,
-            container=self.cart_menu,
-            object_id='#btn_remove_apple'
-        )
+        #AL INICIO: ocultar los botones +/- porque el carrito está vacío
+        self.btn_remove_apple.hide()
+        self.btn_add_apple.hide()
 
         # Botones del carrito
         self.btn_continue_shopping = UIButton(
@@ -145,13 +149,22 @@ class MenuGUI:
         
         return self.cart_menu
 
+
     def update_cart_display(self, cart_dict):
         """
         Actualiza el contenido textual del carrito a partir de un dict {product_type: qty}.
+        Controla también la visibilidad de los botones +/-.
         """
         total_items = sum(cart_dict.values()) if cart_dict else 0
+
         if total_items == 0:
-            html = "<b>Tu carrito está vacío</b><br>Haz click en las manzanas para añadirlas."
+            # Carrito vacío: solo mensaje sencillo, sin instrucciones extra
+            html = "<b>Tu carrito está vacío</b>"
+            # Ocultar los botones +/- si existen
+            if hasattr(self, "btn_add_apple") and self.btn_add_apple is not None:
+                self.btn_add_apple.hide()
+            if hasattr(self, "btn_remove_apple") and self.btn_remove_apple is not None:
+                self.btn_remove_apple.hide()
         else:
             html = "<b>Contenido del carrito:</b><br>"
             # De momento solo 'apple'
@@ -161,8 +174,15 @@ class MenuGUI:
 
             html += f"<br><i>Total de artículos: {total_items}</i>"
 
+            # Hay contenido: mostrar los botones +/- para ajustar cantidad
+            if hasattr(self, "btn_add_apple") and self.btn_add_apple is not None:
+                self.btn_add_apple.show()
+            if hasattr(self, "btn_remove_apple") and self.btn_remove_apple is not None:
+                self.btn_remove_apple.show()
+
         if hasattr(self, "cart_textbox") and self.cart_textbox is not None:
             self.cart_textbox.set_text(html)
+
 
 
     def _create_controls_section(self, y_pos):
@@ -431,15 +451,24 @@ class MenuGUI:
                 menu.hide()
 
     def toggle_main_menu(self):
-        """Alterna la visibilidad del menú principal"""
-        if self.main_menu:
-            if self.main_menu.visible:
-                self.main_menu.hide()
-                return False
-            else:
-                self.main_menu.show()
-                return True
-        return False
+        """Alterna la visibilidad del menú principal.
+
+        Si la ventana fue cerrada con la [X] (sprite muerto),
+        la recreamos antes de mostrarla.
+        """
+        # Si no existe o ha sido 'kill()' por pygame_gui, recrear
+        if self.main_menu is None or not self.main_menu.alive():
+            self.main_menu = self.create_main_menu()
+            self.main_menu.show()
+            return True
+
+        if self.main_menu.visible:
+            self.main_menu.hide()
+            return False
+        else:
+            self.main_menu.show()
+            return True
+
 
     def cleanup(self):
         """Limpia todos los recursos de UI"""
