@@ -5,7 +5,7 @@ from src.objects.wall import Wall
 from src.objects.model_obj import ModelOBJ
 from src.placement.shelf_space import ShelfSpace
 from src.placement.placer import pack_grid_on_shelf
-from src.utils.geometry import aabb_world_from_local, aabb_overlap_3d
+from src.utils.geometry import aabb_world_from_local, aabb_overlap_3d, ray_aabb_intersection
 
 
 
@@ -23,7 +23,7 @@ class SceneManager:
             "cart": [],      # Objetos específicos de vista carrito
             "config": []     # Objetos específicos de vista config
         }
-        
+        self.product_items = []  # productos clicables en escena
         self.shelf_spaces = []
         self.static_colliders = []
         self.setup_scene()
@@ -121,6 +121,29 @@ class SceneManager:
 
         return True
 
+    def raycast_pick_product(self, ray_origin, ray_dir):
+        """
+        Lanza un rayo contra todos los productos (self.product_items)
+        y devuelve (item, distancia) del más cercano, o (None, None).
+        """
+        best_item = None
+        best_t = None
+
+        for item in self.product_items:
+            aabb = self.get_entity_aabb_world(item)
+            if aabb is None:
+                continue
+            a_min, a_max = aabb  # son tuplas (x,y,z)
+            t = ray_aabb_intersection(ray_origin, ray_dir, a_min, a_max)
+            if t is None:
+                continue
+            if t < 0:
+                continue
+            if best_t is None or t < best_t:
+                best_t = t
+                best_item = item
+
+        return best_item, best_t
 
     
     def set_scene(self, scene_name):
@@ -315,6 +338,7 @@ class SceneManager:
                 item.set_position((x, y_item, z))
                 spawned.append(item)
                 self.objects.append(item)
+                self.product_items.append(item)
                 # ✅ Añadir a objetos de escena "main" (productos en estantería)
                 self.scene_objects["main"].append(item)
 

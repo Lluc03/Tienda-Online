@@ -79,6 +79,91 @@ class MenuGUI:
         self._create_controls_section(y_pos)
         
         return self.main_menu
+    
+    def create_cart_menu(self):
+        """Crea el menú del carrito de compras"""
+        if self.cart_menu:
+            self.cart_menu.kill()
+            
+        self.cart_menu = UIWindow(
+            rect=pg.Rect(350, 50, 400, 400),
+            manager=self.ui_manager,
+            window_display_title='Carrito de Compras',
+            object_id='#cart_menu'
+        )
+
+        # TextBox con el contenido del carrito (se actualizará dinámicamente)
+        self.cart_textbox = UITextBox(
+            relative_rect=pg.Rect(10, 10, 380, 220),
+            html_text="<b>Tu carrito está vacío</b><br>Agrega productos desde el catálogo",
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#cart_content'
+        )
+
+        # Botones +/- para manzana (producto único por ahora)
+        self.btn_add_apple = UIButton(
+            relative_rect=pg.Rect(10, 240, 185, 35),
+            text='➕ Añadir manzana',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_add_apple'
+        )
+
+        self.btn_remove_apple = UIButton(
+            relative_rect=pg.Rect(205, 240, 185, 35),
+            text='➖ Quitar manzana',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_remove_apple'
+        )
+
+        # Botones del carrito
+        self.btn_continue_shopping = UIButton(
+            relative_rect=pg.Rect(10, 285, 185, 35),
+            text='Seguir Comprando',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_continue_shopping'
+        )
+
+        self.btn_checkout = UIButton(
+            relative_rect=pg.Rect(205, 285, 185, 35),
+            text='Checkout',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_checkout'
+        )
+
+        self.btn_close_cart = UIButton(
+            relative_rect=pg.Rect(10, 330, 380, 35),
+            text='Cerrar Carrito',
+            manager=self.ui_manager,
+            container=self.cart_menu,
+            object_id='#btn_close_cart'
+        )
+        
+        return self.cart_menu
+
+    def update_cart_display(self, cart_dict):
+        """
+        Actualiza el contenido textual del carrito a partir de un dict {product_type: qty}.
+        """
+        total_items = sum(cart_dict.values()) if cart_dict else 0
+        if total_items == 0:
+            html = "<b>Tu carrito está vacío</b><br>Haz click en las manzanas para añadirlas."
+        else:
+            html = "<b>Contenido del carrito:</b><br>"
+            # De momento solo 'apple'
+            qty_apple = cart_dict.get("apple", 0)
+            if qty_apple > 0:
+                html += f"- Manzana: {qty_apple} ud.<br>"
+
+            html += f"<br><i>Total de artículos: {total_items}</i>"
+
+        if hasattr(self, "cart_textbox") and self.cart_textbox is not None:
+            self.cart_textbox.set_text(html)
+
 
     def _create_controls_section(self, y_pos):
         """Crea la sección de controles del menú principal"""
@@ -211,7 +296,7 @@ class MenuGUI:
         )
         
         return self.product_menu
-
+    '''
     def create_cart_menu(self):
         """Crea el menú del carrito de compras"""
         if self.cart_menu:
@@ -259,7 +344,7 @@ class MenuGUI:
         )
         
         return self.cart_menu
-
+    '''
     def create_config_menu(self):
         """Crea el menú de configuración"""
         if self.config_menu:

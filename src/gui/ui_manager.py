@@ -19,6 +19,9 @@ class UIManager:
         self.on_continue_shopping = None
         self.on_checkout = None
         self.on_apply_config = None
+        self.on_cart_add_apple = None
+        self.on_cart_remove_apple = None
+
         
         # Crear menú principal al inicio
         self.menu_gui.create_main_menu()
@@ -101,6 +104,18 @@ class UIManager:
                 print("❌ Botón Cerrar Carrito presionado")
                 if self.on_close_menu:
                     self.on_close_menu()
+            
+            # Botones específicos del carrito (+/- manzana)
+            elif hasattr(self.menu_gui, 'btn_add_apple') and ui_element == self.menu_gui.btn_add_apple:
+                print("➕ Añadir manzana desde carrito")
+                if self.on_cart_add_apple:
+                    self.on_cart_add_apple()
+
+            elif hasattr(self.menu_gui, 'btn_remove_apple') and ui_element == self.menu_gui.btn_remove_apple:
+                print("➖ Quitar manzana desde carrito")
+                if self.on_cart_remove_apple:
+                    self.on_cart_remove_apple()
+
             
             # Menú de configuración
             elif hasattr(self.menu_gui, 'btn_apply_config') and ui_element == self.menu_gui.btn_apply_config:

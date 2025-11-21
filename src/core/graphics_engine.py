@@ -21,6 +21,8 @@ class GraphicsEngine:
         self.scene_manager = SceneManager(self)
         self.ui_manager = UIManager(self.WIN_SIZE)
         self.view_mode = "third"
+        self.cart = {"apple": 0} # Carrito lógico (por ahora solo manzanas)
+
         
 
         # Referencia al avatar controlable (si la escena lo define)
@@ -114,6 +116,10 @@ class GraphicsEngine:
         # Callbacks del carrito
         self.ui_manager.on_continue_shopping = self._on_continue_shopping
         self.ui_manager.on_checkout = self._on_checkout
+        #(+/-)
+        self.ui_manager.on_cart_add_apple = self._on_cart_add_apple
+        self.ui_manager.on_cart_remove_apple = self._on_cart_remove_apple
+
         
         # Callbacks de configuración
         self.ui_manager.on_apply_config = self._on_apply_config
@@ -131,6 +137,15 @@ class GraphicsEngine:
         print("✓ Abrir carrito")
         self.ui_manager.show_menu("cart")
         self.scene_manager.set_scene("cart")
+    
+    def _on_cart_add_apple(self):
+        self.add_product_to_cart("apple")
+        self.ui_manager.menu_gui.update_cart_display(self.cart)
+
+    def _on_cart_remove_apple(self):
+        self.remove_product_from_cart("apple")
+        self.ui_manager.menu_gui.update_cart_display(self.cart)
+
 
     def _on_config_click(self):
         """Callback para botón Configuración"""
@@ -224,14 +239,18 @@ class GraphicsEngine:
             # 3. Ratón
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Click izquierdo
-                    # SOLO en tercera persona activamos control de cámara con ratón
-                    if self.view_mode == "third" and not self.ui_manager.is_hovering_ui():
-                        self.left_mouse_pressed = True
-                        self.camera.first_mouse = True
-                        pg.mouse.set_visible(False)
-                        pg.event.set_grab(True)
-                        print("✓ Control de cámara activado")
-                    # En primera persona dejamos el ratón libre (más adelante: selección de objetos)
+                    if not self.ui_manager.is_hovering_ui():
+                        if self.view_mode == "third":
+                            # Control de cámara como antes
+                            self.left_mouse_pressed = True
+                            self.camera.first_mouse = True
+                            pg.mouse.set_visible(False)
+                            pg.event.set_grab(True)
+                            print("✓ Control de cámara activado")
+                        else:
+                            # Modo primera persona: selección de producto
+                            self.pick_product_at(event.pos)
+
 
                 elif event.button == 3:  # Click derecho
                     if not self.ui_manager.is_hovering_ui():
@@ -414,46 +433,78 @@ class GraphicsEngine:
         modo = "Primera persona" if self.view_mode == "first" else "Tercera persona"
         print(f"🔁 Modo de cámara cambiado a: {modo}")
 
+    def _screen_ray(self, mouse_x, mouse_y):
+        """
+        Convierte un punto en pantalla (px) en un rayo en espacio mundo.
+        Devuelve (origin: glm.vec3, dir: glm.vec3 normalizado).
+        """
+        w, h = self.WIN_SIZE
+        # NDC
+        x = (2.0 * mouse_x) / w - 1.0
+        y = 1.0 - (2.0 * mouse_y) / h
 
+        # Puntos en clip space
+        p_near = glm.vec4(x, y, -1.0, 1.0)
+        p_far  = glm.vec4(x, y,  1.0, 1.0)
+
+        inv_vp = glm.inverse(self.camera.m_proj * self.camera.m_view)
+
+        world_near = inv_vp * p_near
+        world_far  = inv_vp * p_far
+
+        world_near /= world_near.w
+        world_far  /= world_far.w
+
+        origin = glm.vec3(world_near.x, world_near.y, world_near.z)
+        direction = glm.normalize(glm.vec3(world_far - world_near))
+
+        return origin, direction
+
+    def pick_product_at(self, mouse_pos):
+        """
+        Intenta seleccionar un producto bajo el cursor y lo añade al carrito.
+        """
+        if not hasattr(self.scene_manager, "raycast_pick_product"):
+            return
+
+        mx, my = mouse_pos
+        ray_o, ray_d = self._screen_ray(mx, my)
+
+        item, dist = self.scene_manager.raycast_pick_product(ray_o, ray_d)
+        if item is None:
+            print("🙅‍♂️ No se ha clicado ningún producto")
+            return
+
+        # De momento todas las instancias son manzanas
+        product_type = getattr(item, "product_type", "apple")
+        self.add_product_to_cart(product_type)
+        print(f"✅ Producto seleccionado: {product_type} (dist={dist:.3f})")
+
+        # Actualizar GUI del carrito si está abierto
+        if self.ui_manager.menu_gui.cart_menu:
+            self.ui_manager.menu_gui.update_cart_display(self.cart)
     
-    def update_camera_from_avatar(self):
-        """
-        Sincroniza la cámara con el avatar SOLO en primera persona.
+    def add_product_to_cart(self, product_type):
+        if product_type not in self.cart:
+            self.cart[product_type] = 0
+        self.cart[product_type] += 1
+        print(f"🛒 Carrito: {product_type} -> {self.cart[product_type]} ud.")
 
-        - Modo 'first': cámara en la "cabeza" del avatar, ligeramente adelantada.
-        - Modo 'third': no tocamos la cámara (modo dios).
-        """
-        if not getattr(self, "avatar", None):
+    def remove_product_from_cart(self, product_type):
+        if product_type not in self.cart:
             return
-
-        # En tercera persona no tocamos nada: la cámara la mueve el usuario
-        if self.view_mode != "first":
+        if self.cart[product_type] <= 0:
             return
+        self.cart[product_type] -= 1
+        print(f"🛒 Carrito: {product_type} -> {self.cart[product_type]} ud.")
 
-        avatar_pos = self.avatar.get_position()
-
-        # Altura aproximada de los ojos
-        eye_height = 1.2
-
-        # Posición base de la cabeza
-        head_pos = glm.vec3(
-            avatar_pos.x,
-            avatar_pos.y + eye_height,
-            avatar_pos.z
-        )
-
-        # Offset hacia delante para no estar dentro del paralelepípedo
-        forward_flat = glm.vec3(self.camera.forward.x, 0.0, self.camera.forward.z)
-        if glm.length(forward_flat) > 0:
-            forward_flat = glm.normalize(forward_flat)
-        else:
-            forward_flat = glm.vec3(0.0, 0.0, -1.0)
-
-        # Unos 20 cm por delante del cuerpo
-        offset = forward_flat * 0.2
-
-        self.camera.position = head_pos + offset
-        self.camera.update_view_matrix()
+    def _on_carrito_click(self):
+        """Callback para botón Carrito"""
+        print("✓ Abrir carrito")
+        self.ui_manager.show_menu("cart")
+        self.scene_manager.set_scene("cart")
+        # Mostrar el contenido actual
+        self.ui_manager.menu_gui.update_cart_display(self.cart)
 
 
     def render_gui(self):
@@ -475,6 +526,8 @@ class GraphicsEngine:
         self.quad_program['tex'] = 0
         self.quad_vao.render(mgl.TRIANGLE_STRIP)
         self.ctx.enable(mgl.DEPTH_TEST)
+
+    
 
     def render(self):
         """Renderiza la escena completa"""
