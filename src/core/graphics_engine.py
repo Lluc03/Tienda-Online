@@ -16,6 +16,7 @@ class GraphicsEngine:
         
         # Componentes principales
         self.camera = Camera(self)
+        self.default_shader_pbr = self._create_pbr_shader()
         self.scene_manager = SceneManager(self)
         self.ui_manager = UIManager(self.WIN_SIZE)
         
@@ -41,6 +42,8 @@ class GraphicsEngine:
         self.screen = pg.display.set_mode(self.WIN_SIZE, flags=pg.OPENGL | pg.DOUBLEBUF)
         self.ctx = mgl.create_context()
         self.ctx.enable(mgl.DEPTH_TEST)
+
+        self.ctx.disable(mgl.CULL_FACE)
         
         # Setup GUI rendering
         self._setup_gui_rendering()
@@ -84,6 +87,61 @@ class GraphicsEngine:
             self.quad_program,
             [(self.quad, '2f 2f', 'in_vert', 'in_uv')]
         )
+
+    def _create_pbr_shader(self):
+        """Shader básico para Model3D (GLTF/GLB)"""
+        return self.ctx.program(
+            vertex_shader='''
+                #version 330
+
+                layout (location = 0) in vec3 in_position;
+                layout (location = 1) in vec2 in_uv;
+
+                uniform mat4 m_proj;
+                uniform mat4 m_view;
+                uniform mat4 m_model;
+
+                out vec2 v_uv;
+
+                void main() {
+                    v_uv = in_uv;
+                    gl_Position = m_proj * m_view * m_model * vec4(in_position, 1.0);
+                }
+            ''',
+            fragment_shader='''
+                #version 330
+
+                in vec2 v_uv;
+                out vec4 fragColor;
+
+                // Texturas PBR básicas
+                uniform sampler2D baseColorTex;
+                uniform sampler2D metalRoughTex;
+                uniform sampler2D normalTex;
+
+                // Flags para saber si usar cada textura
+                uniform int use_baseColorTex;
+                uniform int use_metalRoughTex;
+                uniform int use_normalTex;
+
+                void main() {
+                    // Color base por defecto (blanco)
+                    vec4 color = vec4(1.0);
+
+                    // Si hay textura de color base, úsala
+                    if (use_baseColorTex == 1) {
+                        color = texture(baseColorTex, v_uv);
+                    }
+
+                    // Ahora mismo ignoramos metalRoughTex y normalTex
+                    // para simplificar (pero los uniforms existen para que
+                    // Model3D funcione sin fallos).
+
+                    fragColor = color;
+                }
+            '''
+        )
+
 
     def _setup_ui_callbacks(self):
         """Configura los callbacks de la UI"""

@@ -138,14 +138,15 @@ class BaseObject:
                 ''',
                 fragment_shader='''
                     #version 330
-                    uniform sampler2D tex0;
+                    uniform sampler2D u_texture_0;
                     in vec2 v_uv;
                     out vec4 fragColor;
                     void main() {
-                        fragColor = texture(tex0, v_uv);
+                        fragColor = texture(u_texture_0, v_uv);
                     }
                 '''
             )
+
         else:
             return self.ctx.program(
                 vertex_shader='''

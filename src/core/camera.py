@@ -6,24 +6,29 @@ class Camera:
         self.app = app
         self.aspect_ratio = app.WIN_SIZE[0] / app.WIN_SIZE[1]
         
-        # Position and orientation
-        self.position = glm.vec3(0, 1, 5)
+        # 🚪 POSICIÓN INICIAL: Cerca de la entrada (esquina frontal-derecha)
+        # Supermercado: centro en (0, 2.5, 0), tamaño (20, 5, 15)
+        # Esquina frontal-derecha: x=+10, z=+7.5
+        # Entrada a 1 metro hacia dentro: z = 7.5 - 1.0 = 6.5
+        self.position = glm.vec3(8.0, 1.7, 12.0)  # x cerca del borde, altura humana, 1m dentro
+        
         self.up = glm.vec3(0, 1, 0)
         self.right = glm.vec3(1, 0, 0)
         self.forward = glm.vec3(0, 0, -1)
         
-        # Rotation
-        self.yaw = -90.0   # Horizontal angle (left/right)
-        self.pitch = 0.0   # Vertical angle (up/down)
+        # 🎯 ORIENTACIÓN INICIAL: Mirando hacia el interior (hacia -Z y ligeramente hacia -X)
+        self.yaw = 270.0
+        self.pitch = 0.0
+    # Horizonte recto
         
         # Configuration
         self.target = glm.vec3(0, 1, 0)
         self.fov = 60
         self.perspective = True
         
-        # Speeds - Adjusted for dragging
+        # Speeds
         self.move_speed = 0.05
-        self.mouse_sensitivity = 0.1  # Slightly more sensitive for dragging
+        self.mouse_sensitivity = 0.1
         
         # Mouse control
         self.first_mouse = True
@@ -31,23 +36,22 @@ class Camera:
         self.last_mouse_y = 0
         
         # Matrices
+        self.update_camera_vectors()  # 👈 Actualizar vectores ANTES de crear matrices
         self.m_view = self.get_view_matrix()
         self.m_proj = self.get_projection_matrix()
-        
-        self.update_camera_vectors()
 
     def reset_camera(self):
-        """Resetea la cámara a su posición inicial - NUEVO MÉTODO"""
-        self.position = glm.vec3(0, 1, 5)
+        """Resetea la cámara a la posición de entrada"""
+        self.position = glm.vec3(9.0, 1.7, 6.5)
         self.up = glm.vec3(0, 1, 0)
         self.right = glm.vec3(1, 0, 0)
         self.forward = glm.vec3(0, 0, -1)
-        self.yaw = -90.0
+        self.yaw = -135.0
         self.pitch = 0.0
         self.fov = 60
         self.update_camera_vectors()
         self.update_view_matrix()
-        print("✓ Cámara resetada a posición inicial")
+        print("✓ Cámara resetada a la entrada del supermercado")
 
     def get_view_matrix(self):
         return glm.lookAt(self.position, self.position + self.forward, self.up)
