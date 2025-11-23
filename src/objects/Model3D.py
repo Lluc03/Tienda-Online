@@ -32,24 +32,68 @@ class Model3D:
         self.gltf = None
         self.buffer_data = []
 
-        # Vértices
+        # Geometría
         self.vertices = None
         self.uvs = None
         self.indices = None
 
-        # Recursos GPU
+        # AABB local cache
+        self._aabb_local = None
+
+        # GPU resources
         self.vbo = None
         self.ibo = None
         self.vao = None
         self.texture = None
         self.shader = None
 
-        # Iniciar carga
+        # Load stages
         self._load_gltf()
         self._extract_mesh_data()
         self._load_textures()
         self._create_shader()
         self._create_buffers()
+
+    # -------------------------------------------------------------
+    # Helpers
+    # -------------------------------------------------------------
+    def get_position(self):
+        return self.position
+
+    def set_position(self, xyz):
+        self.position = glm.vec3(*xyz)
+
+    def set_scale(self, xyz):
+        self.scale = glm.vec3(*xyz)
+
+    def set_rotation(self, deg_tuple):
+        # deg_tuple = (pitch, yaw, roll)
+        self.rotation = deg_tuple
+
+    # -------------------------------------------------------------
+    # AABB LOCAL PARA COLISIONES
+    # -------------------------------------------------------------
+    def aabb_local(self):
+        """
+        Devuelve el AABB local del modelo basándose en self.vertices.
+        SceneManager.try_move() usa este volumen para colisiones.
+        """
+        if self._aabb_local is not None:
+            return self._aabb_local
+
+        if self.vertices is None or len(self.vertices) == 0:
+            return None
+
+        mins = self.vertices.min(axis=0)
+        maxs = self.vertices.max(axis=0)
+
+        # DEVOLVER glm.vec3, NO TUPLAS
+        self._aabb_local = (
+            glm.vec3(float(mins[0]), float(mins[1]), float(mins[2])),
+            glm.vec3(float(maxs[0]), float(maxs[1]), float(maxs[2])),
+        )
+        return self._aabb_local
+
 
     # -------------------------------------------------------------
     # CARGA GLB
@@ -142,12 +186,10 @@ class Model3D:
 
         self.texture = None
 
-        # 1) Comprobar que hay materiales
         if not self.gltf.materials:
             print("⚠ Modelo sin materiales. No hay baseColorTexture.")
             return
 
-        # 2) Intentar obtener la textura baseColor del PRIMER material
         img = None
         try:
             mat = self.gltf.materials[0]
@@ -162,30 +204,26 @@ class Model3D:
         except Exception as e:
             print(f"⚠ No se pudo resolver baseColorTexture desde el material: {e}")
 
-        # 3) Si no se ha encontrado, usar la primera imagen como último recurso
         if img is None:
             if not self.gltf.images:
-                print("⚠ Modelo sin imágenes. No hay textura que cargar.")
+                print("⚠ Modelo sin imágenes. No hay textura.")
                 return
             print("⚠ Material sin baseColorTexture; usando la primera imagen del GLB.")
             img = self.gltf.images[0]
 
-        # 4) Cargar la imagen (embedida o en bufferView)
+        # Leer image embebida o desde bufferView
         if img.uri and img.uri.startswith("data:"):
-            # Imagen embebida como data URI
             header, encoded = img.uri.split(",", 1)
             data = base64.b64decode(encoded)
             image = Image.open(io.BytesIO(data))
-
         elif img.bufferView is not None:
-            # Imagen en bufferView (caso clásico de GLB)
             bv = self.gltf.bufferViews[img.bufferView]
             buf = self.buffer_data[bv.buffer]
             offset = bv.byteOffset or 0
             data = buf[offset: offset + bv.byteLength]
             image = Image.open(io.BytesIO(data))
         else:
-            print("⚠ No se encontró fuente de datos válida para la textura.")
+            print("⚠ No se encontró imagen válida.")
             return
 
         image = image.convert("RGBA")
@@ -193,7 +231,6 @@ class Model3D:
 
         self.texture = self.ctx.texture(arr.shape[1::-1], 4, arr.tobytes())
         self.texture.build_mipmaps()
-
 
     # -------------------------------------------------------------
     # SHADER SIMPLE
@@ -252,10 +289,10 @@ class Model3D:
         return m
 
     # -------------------------------------------------------------
-    # COMPATIBILIDAD CON SceneManager
+    # COMPATIBILIDAD CON SCENEMANAGER
     # -------------------------------------------------------------
     def update_matrices(self):
-        pass  # No hace falta
+        pass  # No hace falta para GLB simple
 
     # -------------------------------------------------------------
     # RENDER

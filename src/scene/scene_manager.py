@@ -1,5 +1,7 @@
 import glm
+import math
 from src.objects.Model3D import Model3D
+from src.objects.model_obj import ModelOBJ
 from src.objects.floor import Floor
 from src.objects.wall import Wall
 from src.objects.InstancedModel3D import InstancedModel3D
@@ -11,43 +13,50 @@ from src.objects.coordenates.apple_positions import APPLE
 from src.objects.coordenates.cereals_positions import CEREALS
 from src.objects.coordenates.wine_positions import WINE
 
+# ===== GEOMETRÍA IMPORTADA =====
+from src.utils.geometry import (
+    aabb_world_from_local,
+    aabb_overlap_3d,
+    ray_aabb_intersection
+)
+
 
 class SceneManager:
     """
     🏗️ Gestor de escenas con sistema de habitación tipo cubo perfecto.
-    
-    Arquitectura:
-    - Paredes exteriores que forman un cubo cerrado
-    - Cada pared con una sola cara visible desde el interior
-    - Sistema modular para añadir decoración
     """
-    
+
     def __init__(self, app):
         self.app = app
         self.objects = []
         self.current_scene = "main"
-        
+
+        # Para colisiones y raycast (añadido)
+        self.static_colliders = []     # lista de (min, max)
+        self.product_items = []        # objetos clicables
+
         # Configuración de la sala
         self.room_config = {
-            "width": 20.0,      # Ancho interior (eje X)
-            "height": 5.0,      # Alto interior (eje Y)
-            "depth": 15.0,      # Profundidad interior (eje Z)
-            "wall_thickness": 0.3,  # Grosor de paredes más visible
+            "width": 20.0,
+            "height": 5.0,
+            "depth": 15.0,
+            "wall_thickness": 0.3,
             "door_width": 3.0,
             "door_height": 2.8
         }
-        
+
         self.scene_objects = {
             "main": [],
             "products": [],
             "cart": [],
             "config": []
         }
-        
+
         self.shelves = []
 
+        # ===== Construcción escena =====
         self.setup_main_room()
-        self.setup_cash_registers()  # Movido aquí para que se cuente correctamente
+        self.setup_cash_registers()
         self._create_shelves()
         self._create_water_packs()
         self._create_chips()
@@ -55,7 +64,10 @@ class SceneManager:
         self._create_apples()
         self._create_cereals()
         self._create_wine()
+        self._create_avatar()
 
+        # Regeneramos colliders
+        self.rebuild_static_colliders()
 
         print(f"\n📋 RESUMEN DE ESCENA:")
         print(f"   Total objetos: {len(self.objects)}")
@@ -64,133 +76,282 @@ class SceneManager:
             obj_type = type(obj).__name__
             pos = getattr(obj, 'position', 'N/A')
             print(f"   [{i}] {obj_type} en {pos}")
-    
+
+    # ======================================================================
+    #                   📦 FUNCIONES IMPORTADAS DEL OTRO SCENEMANAGER
+    # ======================================================================
+
+    def rebuild_static_colliders(self):
+        """Construye colliders AABB de todos los objetos excepto el avatar y suelos caminables."""
+        self.static_colliders = []
+
+        avatar = getattr(self, "avatar", None)
+
+        for obj in self.objects:
+            # No incluir avatar
+            if obj is avatar:
+                continue
+
+            # Excluir objetos marcados como caminables
+            if getattr(obj, "is_walkable", False):
+                continue
+
+            # No podemos obtener matriz → no se usa como colisionador
+            if not hasattr(obj, "get_model_matrix"):
+                continue
+
+            # AABB local correcto
+            if hasattr(obj, "aabb_local") and callable(obj.aabb_local):
+                local = obj.aabb_local()
+            else:
+                local = (glm.vec3(-0.5, 0, -0.5), glm.vec3(0.5, 1.0, 0.5))
+
+            if not local:
+                continue
+
+            local_min, local_max = local
+
+            wmin, wmax = aabb_world_from_local(
+                local_min, local_max,
+                obj.get_model_matrix()
+            )
+
+            self.static_colliders.append(
+                (glm.vec3(*wmin), glm.vec3(*wmax))
+            )
+
+        print(f"✓ Colliders estáticos: {len(self.static_colliders)}")
+
+    def get_entity_aabb_world(self, entity):
+        """Devuelve AABB global del entity como glm.vec3, compatible con try_move()."""
+
+        fn = getattr(entity, "aabb_local", None)
+        if not callable(fn):
+            return None
+
+        local = fn()
+        if not local:
+            return None
+
+        local_min, local_max = local
+
+        wmin_t, wmax_t = aabb_world_from_local(
+            local_min, local_max,
+            entity.get_model_matrix()
+        )
+
+        return glm.vec3(*wmin_t), glm.vec3(*wmax_t)
+
+
+    def try_move(self, entity, delta, keep_on_ground=True):
+        """Intenta mover y detecta colisiones AABB."""
+        if delta is None:
+            return True
+
+        if isinstance(delta, tuple):
+            delta = glm.vec3(*delta)
+
+        if glm.length(delta) == 0:
+            return True
+
+        if not hasattr(entity, "set_position") or not hasattr(entity, "position"):
+            return False
+
+        old_pos = glm.vec3(entity.position)
+        new_pos = old_pos + delta
+
+        if keep_on_ground and new_pos.y < 0:
+            new_pos.y = 0
+
+        entity.position = new_pos
+
+        aabb = self.get_entity_aabb_world(entity)
+        if aabb is None:
+            return True
+
+        a_min, a_max = aabb
+
+        for b_min, b_max in self.static_colliders:
+            if aabb_overlap_3d((a_min.x, a_min.y, a_min.z),
+                               (a_max.x, a_max.y, a_max.z),
+                               (b_min.x, b_min.y, b_min.z),
+                               (b_max.x, b_max.y, b_max.z)):
+                # revertimos
+                entity.position = old_pos
+                return False
+
+        return True
+
+    def raycast_pick_product(self, ray_origin, ray_dir):
+        """Raycast contra productos GLTF con detección por instancia."""
+        best = None
+        best_instance_id = -1
+        best_t = None
+
+        for item in self.product_items:
+            # Para InstancedModel3D, verificar cada instancia
+            from src.objects.InstancedModel3D import InstancedModel3D
+            
+            if isinstance(item, InstancedModel3D):
+                # Obtener AABB local base
+                local_aabb = item.aabb_local()
+                if local_aabb is None:
+                    continue
+                
+                local_min, local_max = local_aabb
+                
+                # Verificar cada instancia
+                for inst_id, inst_data in enumerate(item.instances):
+                    # Construir matriz de transformación para esta instancia
+                    pos = inst_data.get("pos", (0, 0, 0))
+                    rot = inst_data.get("rot", (0, 0, 0))
+                    scale = inst_data.get("scale", (1, 1, 1))
+                    
+                    # Normalizar a tuplas
+                    if isinstance(pos, (int, float)):
+                        pos = (pos, pos, pos)
+                    if isinstance(rot, (int, float)):
+                        rot = (rot, rot, rot)
+                    if isinstance(scale, (int, float)):
+                        scale = (scale, scale, scale)
+                    
+                    # Crear matriz de transformación para esta instancia
+                    m = glm.mat4(1.0)
+                    m = glm.translate(m, glm.vec3(*pos))
+                    m = glm.rotate(m, glm.radians(rot[0]), glm.vec3(1, 0, 0))
+                    m = glm.rotate(m, glm.radians(rot[1]), glm.vec3(0, 1, 0))
+                    m = glm.rotate(m, glm.radians(rot[2]), glm.vec3(0, 0, 1))
+                    m = glm.scale(m, glm.vec3(*scale))
+                    
+                    # Transformar AABB al espacio mundial
+                    from src.utils.geometry import aabb_world_from_local, ray_aabb_intersection
+                    wmin, wmax = aabb_world_from_local(local_min, local_max, m)
+                    
+                    # Raycast contra este AABB
+                    t = ray_aabb_intersection(ray_origin, ray_dir, 
+                                            glm.vec3(*wmin), glm.vec3(*wmax))
+                    
+                    if t is None or t < 0:
+                        continue
+                    
+                    # Guardar si es el más cercano
+                    if best_t is None or t < best_t:
+                        best_t = t
+                        best = item
+                        best_instance_id = inst_id
+            
+            else:
+                # Objeto normal (no instanciado)
+                aabb = self.get_entity_aabb_world(item)
+                if aabb is None:
+                    continue
+
+                a_min, a_max = aabb
+                from src.utils.geometry import ray_aabb_intersection
+                t = ray_aabb_intersection(ray_origin, ray_dir, a_min, a_max)
+                if t is None or t < 0:
+                    continue
+
+                if best_t is None or t < best_t:
+                    best_t = t
+                    best = item
+                    best_instance_id = -1
+
+        return best, best_instance_id, best_t
+
+    # ======================================================================
+    #                       ⬇️ CÓDIGO ORIGINAL COMPLETO
+    # ======================================================================
     def setup_main_room(self):
-        """
-        🏢 Construye una sala tipo cubo cerrado con puerta.
-        Sistema simplificado con paredes que se tocan perfectamente.
-        """
         print("🏗️ Construyendo sala del supermercado...")
-        
+
         cfg = self.room_config
-        
-        # Dimensiones interiores
         w = cfg["width"]
         h = cfg["height"]
         d = cfg["depth"]
         t = cfg["wall_thickness"]
-        
-        # Texturas
+
         floor_tex = "assets/textures/floor_prove1.jpg"
         wall_tex = "assets/textures/wall_white.jpg"
-        
-        # ===== 📐 SUELO =====
+
         self._create_floor(floor_tex, w, d)
-        
-        # ===== 🧱 SISTEMA DE PAREDES (de dentro hacia fuera) =====
-        
-        # 1. PARED TRASERA (Z negativo) - Completa
+
+        # ===== PAREDES =====
         self._create_wall(
             texture_path=wall_tex,
             position=glm.vec3(0, h/2, -d/2 - t/2),
-            size=glm.vec3(w + 2*t, h, t),  # Ancho total incluyendo laterales
+            size=glm.vec3(w + 2*t, h, t),
             uv_scale=(w/4, h/4),
             rotation=(0, 0, 0),
             face="front",
             name="Pared trasera"
         )
-        
-        # 2. PAREDES LATERALES (solo la parte interior, sin incluir esquinas)
-        # Izquierda (X negativo) - necesita rotar 90° para que mire hacia +X (interior)
+
         self._create_wall(
             texture_path=wall_tex,
             position=glm.vec3(-w/2 - t/2 + 1.0, h/2, 0),
-            size=glm.vec3(d, h, t),  # d en X local, luego se rota
+            size=glm.vec3(d, h, t),
             uv_scale=(d/4, h/4),
-            rotation=(0, 90, 0),  # Rota 90° en Y
-            face="back",  # La cara trasera apuntará a +X después de rotar
+            rotation=(0, 90, 0),
+            face="back",
             name="Pared izquierda"
         )
-        
-        # Derecha (X positivo) - necesita rotar -90° para que mire hacia -X (interior)
+
         self._create_wall(
             texture_path=wall_tex,
             position=glm.vec3(w/2 + t/2, h/2, 0),
-            size=glm.vec3(d, h, t),  # d en X local, luego se rota
+            size=glm.vec3(d, h, t),
             uv_scale=(d/4, h/4),
-            rotation=(0, -90, 0),  # Rota -90° en Y
-            face="front",  # La cara frontal apuntará a -X después de rotar
+            rotation=(0, -90, 0),
+            face="front",
             name="Pared derecha"
         )
-        
-        # 3. PARED FRONTAL CON PUERTA (Z positivo)
+
         self._create_front_wall_with_door(wall_tex, w, h, d, t, cfg)
-        
-        # 4. TECHO
+
         self._create_wall(
             texture_path=wall_tex,
             position=glm.vec3(0, h + t/2, 0),
-            size=glm.vec3(w + 2*t, t, d + 2*t),  # Cubre todo
+            size=glm.vec3(w + 2*t, t, d + 2*t),
             uv_scale=(w/4, d/4),
-            rotation=(90, 0, 0),  # Rota para mirar hacia abajo
+            rotation=(90, 0, 0),
             face="back",
             name="Techo"
         )
-        
-        print(f"✅ Sala base creada")
-        print(f"   📏 Interior: {w}m × {h}m × {d}m")
-        print(f"   🧱 Grosor paredes: {t}m")
-        print(f"   🚪 Puerta: {cfg['door_width']}m × {cfg['door_height']}m")
 
-        # ============================
-        # 🌍 SUELO INFINITO EXTERIOR
-        # ============================
+        print(f"   → Sala lista.")
 
-        # Crear un plano enorme como asfalto
         asphalt = Floor(
             self.app,
             texture_path="assets/textures/asphalt_grey.jpg",
-            uv_scale=(100, 100)   # repetición de la textura
+            uv_scale=(100, 100)
         )
+        asphalt.get_model_matrix = lambda: glm.scale(glm.mat4(), glm.vec3(200, 1, 200))
 
-        # Colocar un modelo mucho más grande que la tienda
-        # El floor original es 10x10, así que lo escalamos MUCHO
-        asphalt.get_model_matrix = lambda: glm.scale(
-            glm.mat4(),
-            glm.vec3(200, 1, 200)   # 200m x 200m de asfalto
-        )
+        # ===== MARCAR COMO NO COLISIONABLE =====
+        asphalt.is_walkable = True  # Flag para identificarlo
 
         self._add_object(asphalt)
-        print("✓ Añadido suelo exterior infinito (asfalto)")
-    
+
+    # -----------------------------------------------------------
     def _create_floor(self, texture_path, width, depth):
-        """Crea el suelo a nivel Y=0."""
         floor = Floor(
             self.app,
             texture_path=texture_path,
             uv_scale=(width / 2.0, depth / 2.0)
         )
-        
-        # Escalar el floor base (10×10) a dimensiones reales
         floor.get_model_matrix = lambda: glm.translate(
-            glm.scale(
-                glm.mat4(),
-                glm.vec3(width / 10.0, 1.0, depth / 10.0)
-            ),
-            glm.vec3(0.0, 0.005, 0.0)  # elevamos el suelo interior
+            glm.scale(glm.mat4(), glm.vec3(width/10.0, 1.0, depth/10.0)),
+            glm.vec3(0.0, 0.005, 0.0)
         )
         
-        self._add_object(floor)
-        print(f"   ✓ Suelo: {width}m × {depth}m")
-    
-    def _create_wall(self, texture_path, position, size, uv_scale, rotation, face, name):
-        """
-        Crea una pared genérica.
+        # ===== MARCAR COMO NO COLISIONABLE =====
+        floor.is_walkable = True
         
-        Args:
-            rotation: tupla (rx, ry, rz) en grados
-            face: "front" o "back"
-        """
+        self._add_object(floor)
+
+    # -----------------------------------------------------------
+    def _create_wall(self, texture_path, position, size, uv_scale, rotation, face, name):
         wall = Wall(
             self.app,
             position=position,
@@ -202,33 +363,18 @@ class SceneManager:
             single_face=face
         )
         self._add_object(wall)
-        print(f"   ✓ {name}: pos={position}, size={size}")
-    
+
+    # -----------------------------------------------------------
     def _create_front_wall_with_door(self, texture_path, w, h, d, t, cfg):
-        """
-        Crea la pared frontal con la puerta movida al lado DERECHO.
-        """
         door_w = cfg["door_width"]
         door_h = cfg["door_height"]
-
-        # Margen entre la puerta y la pared derecha
-        margin = 0.5   # Puedes ajustar a tu gusto
-
-        # Cálculo de posiciones
+        margin = 0.5
         z_pos = d/2 + t/2
 
-        # La puerta irá en la derecha:
-        # derecha total = w/2
-        # puerta pegada justo a la izquierda del margen
         door_center_x = w/2 - margin - door_w/2
-
-        # Pared izquierda mucho más grande
         left_part_width = w - door_w - margin
-
-        # Pared derecha solo relleno del margen
         right_part_width = margin
 
-        # === pared izquierda ===
         self._create_wall(
             texture_path=texture_path,
             position=glm.vec3(-w/2 + left_part_width/2, h/2, z_pos),
@@ -239,10 +385,6 @@ class SceneManager:
             name="Pared frontal izquierda"
         )
 
-        # === puerta (vacío, no se crea geometría; tú puedes poner un modelo aquí después) ===
-        # Si quieres más tarde un modelo, este es el sitio exacto
-
-        # === dintel sobre la puerta ===
         lintel_h = h - door_h
         if lintel_h > 0.1:
             self._create_wall(
@@ -255,7 +397,6 @@ class SceneManager:
                 name="Dintel sobre puerta"
             )
 
-        # === pared derecha (pequeña) ===
         self._create_wall(
             texture_path=texture_path,
             position=glm.vec3(w/2 - right_part_width/2, h/2, z_pos),
@@ -266,42 +407,33 @@ class SceneManager:
             name="Pared frontal derecha"
         )
 
-    
+    # ======================================================================
+    #                         OBJETOS DE LA ESCENA
+    # ======================================================================
     def setup_cash_registers(self):
-        """Añade 2 máquinas registradoras a la escena"""
-        print("\n💰 Cargando máquinas registradoras...")
-        
-        # Máquina registradora 1 - ahora usando GLTF
-        print("   🔸 Caja registradora 1...")
         self.register1 = Model3D(
             self.app,
-            model_path="assets/models/supermarket_checkout.glb",  # Cambiado a GLTF
+            model_path="assets/models/supermarket_checkout.glb",
             position=glm.vec3(4.0, 0.0, -4.0),
             scale=glm.vec3(0.4, 0.4, 0.4),
             rotation=(0.0, -90.0, 0.0)
         )
         self._add_object(self.register1)
-        
-        # Máquina registradora 2 - ahora usando GLTF
-        print("   🔸 Caja registradora 2...")
+
         self.register2 = Model3D(
             self.app,
-            model_path="assets/models/SupermarketCheckout.glb",  # Cambiado a GLTF
+            model_path="assets/models/SupermarketCheckout.glb",
             position=glm.vec3(4.0, 0.0, 2.0),
             scale=glm.vec3(0.4, 0.4, 0.4),
             rotation=(0.0, -90.0, 0.0)
         )
         self._add_object(self.register2)
-        
-        print("✅ Máquinas registradoras añadidas")
 
     def _create_shelves(self):
         shelf_path = "assets/models/supermarket_shelves/shelves2.glb"
-
         for entry in SHELVES:
             pos = entry["pos"]
             rot = entry["rot"]
-
             shelf = Model3D(
                 self.app,
                 model_path=shelf_path,
@@ -309,129 +441,139 @@ class SceneManager:
                 scale=glm.vec3(0.8, 0.8, 0.8),
                 rotation=rot
             )
-
             self.shelves.append(shelf)
             self._add_object(shelf)
 
-
-
     def _create_water_packs(self):
-
         water = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/bottle_water.glb",
             instances=WATER_PACKS
         )
-
         self._add_object(water)
+        self.product_items.append(water)
 
     def _create_chips(self):
-
         chips = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/chips.glb",
             instances=CHIPS
         )
-
         self._add_object(chips)
+        self.product_items.append(chips)
 
     def _create_milk(self):
-
         milk = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/milk2.glb",
             instances=MILK
         )
-
         self._add_object(milk)
+        self.product_items.append(milk)
 
     def _create_apples(self):
-
         apples = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/apple2.glb",
             instances=APPLE
         )
-
         self._add_object(apples)
+        self.product_items.append(apples)
 
     def _create_cereals(self):
-
         cereals = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/cereals1.glb",
             instances=CEREALS
         )
-
         self._add_object(cereals)
+        self.product_items.append(cereals)
 
     def _create_wine(self):
-
         wine = InstancedModel3D(
-            app=self.app,
+            self.app,
             model_path="assets/models/wine_bottle.glb",
             instances=WINE
         )
-
         self._add_object(wine)
+        self.product_items.append(wine)
+
+    def _create_avatar(self):
+        """Crea un capsule collider invisible como avatar físico."""
+        print("\n🧍 Creando avatar físico (CapsuleCollider)...")
+
+        from src.objects.capsule_collider import CapsuleCollider
+
+        cam_pos = self.app.camera.position
+
+        # === Capsule Collider ===
+        # Radio: 0.30m
+        # Altura: 1.75m
+        self.avatar = CapsuleCollider(
+            radius=0.30,
+            height=1.75,
+            position=glm.vec3(cam_pos.x, 0.01, cam_pos.z)  # 0.01 para evitar colisión con suelo
+        )
+
+        # NO agregamos el avatar a self.objects todavía
+        # Primero construimos colliders sin él
+        self._add_object(self.avatar)
+
+        # Regenerar colliders SIN incluir el avatar
+        print("🔄 Reconstruyendo colliders sin avatar...")
+        self.rebuild_static_colliders()
         
+        print(f"✓ Avatar creado en: ({self.avatar.position.x:.2f}, {self.avatar.position.y:.2f}, {self.avatar.position.z:.2f})")
+        print(f"✓ Total colliders estáticos: {len(self.static_colliders)}")
+
+
+
+
+
+    # ======================================================================
+    #                          UTILIDADES
+    # ======================================================================
     def _add_object(self, obj):
-        """Añade un objeto a la escena principal."""
         self.objects.append(obj)
         self.scene_objects["main"].append(obj)
-    
-    # ===== CONTROL DE ESCENAS =====
-    
+
+    # ======================================================================
+    #                          ESCENAS
+    # ======================================================================
     def set_scene(self, scene_name):
-        """Cambia entre diferentes vistas."""
         print(f"🎬 Cambiando escena: '{self.current_scene}' → '{scene_name}'")
         self.current_scene = scene_name
-        
-        scene_methods = {
-            "main": self._setup_main_view,
-            "products": self._setup_products_view,
-            "cart": self._setup_cart_view,
-            "config": self._setup_config_view
-        }
-        
-        if scene_name in scene_methods:
-            scene_methods[scene_name]()
-    
-    def _setup_main_view(self):
-        print("  ↳ Vista principal: Supermercado")
-    
-    def _setup_products_view(self):
-        print("  ↳ Vista productos: Catálogo")
-    
-    def _setup_cart_view(self):
-        print("  ↳ Vista carrito: Items")
-    
-    def _setup_config_view(self):
-        print("  ↳ Vista configuración")
-    
+
     def get_current_scene(self):
         return self.current_scene
-    
-    # ===== RENDERIZADO =====
-    
-    def render(self):
-        """Renderiza todos los objetos de la escena actual."""
-        for obj in self.scene_objects[self.current_scene]:
-            try:
-                obj.update_matrices()
-                obj.render()
-            except Exception as e:
-                obj_type = type(obj).__name__
-                print(f"❌ Error renderizando {obj_type}: {e}")
-    
+
+    # ======================================================================
+    #                          RENDER
+    # ======================================================================
+    def render(self, view_mode="third"):
+        """Renderiza todos los objetos de la escena.
+
+        - En primera persona (view_mode == 'first'): no dibujamos el avatar.
+        - En modo dios (view_mode == 'third'): tampoco dibujamos el avatar.
+        Así no tapa la cámara aunque esté en la misma posición.
+        """
+        avatar_ref = getattr(self, "avatar", None)
+
+        for obj in self.objects:
+            # Ocultar avatar tanto en first como en third
+            if view_mode in ("first", "third") and obj is avatar_ref:
+                continue
+
+            obj.update_matrices()
+            obj.render()
+
+
+    # ======================================================================
+    #                          CLEANUP
+    # ======================================================================
     def cleanup(self):
-        """Libera recursos de GPU."""
         for obj in self.objects:
             try:
                 obj.destroy()
-            except Exception as e:
-                print(f"⚠️ Error liberando objeto: {e}")
-        
-        self.objects.clear()
-        for scene_list in self.scene_objects.values():
-            scene_list.clear()
+            except Exception:
+                pass
