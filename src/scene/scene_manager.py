@@ -5,6 +5,7 @@ from src.objects.model_obj import ModelOBJ
 from src.objects.floor import Floor
 from src.objects.wall import Wall
 from src.objects.InstancedModel3D import InstancedModel3D
+from src.objects.Model3DMultiMaterial import Model3DMultiMaterial
 from src.objects.coordenates.shelves_positions import SHELVES
 from src.objects.coordenates.water_positions import WATER_PACKS
 from src.objects.coordenates.chips_positions import CHIPS
@@ -12,6 +13,18 @@ from src.objects.coordenates.milk_positions import MILK
 from src.objects.coordenates.apple_positions import APPLE
 from src.objects.coordenates.cereals_positions import CEREALS
 from src.objects.coordenates.wine_positions import WINE
+from src.objects.coordenates.cocacola_positions import COCACOLA
+from src.objects.coordenates.cava_positions import CAVA
+from src.objects.coordenates.whiskey_positions import WHISKEY
+from src.objects.coordenates.paper_positions import PAPER
+from src.objects.coordenates.shampoo_positions import SHAMPOO
+from src.objects.coordenates.sponge_positions import SPONGE
+from src.objects.coordenates.candle_positions import CANDLE
+from src.objects.coordenates.jarron_positions import JARRON
+from src.objects.coordenates.mug_positions import MUG
+from src.objects.coordenates.orange_positions import ORANGE
+from src.objects.coordenates.kinder_positions import KINDER
+from src.objects.coordenates.tuna_positions import TUNA
 
 # ===== GEOMETRÍA IMPORTADA =====
 from src.utils.geometry import (
@@ -55,6 +68,7 @@ class SceneManager:
         self.shelves = []
 
         # ===== Construcción escena =====
+        self._create_imported_scene()
         self.setup_main_room()
         self.setup_cash_registers()
         self._create_shelves()
@@ -62,8 +76,20 @@ class SceneManager:
         self._create_chips()
         self._create_milk()
         self._create_apples()
+        self._create_orange()
+        self._create_kinder()
         self._create_cereals()
         self._create_wine()
+        self._create_cocacola()
+        self._create_cava()
+        self._create_whiskey()
+        self._create_paper()
+        self._create_shampoo()
+        self._create_sponge()
+        self._create_candle()
+        self._create_jarron()
+        self._create_mug()
+        self._create_tuna()
         self._create_avatar()
 
         # Regeneramos colliders
@@ -82,34 +108,30 @@ class SceneManager:
     # ======================================================================
 
     def rebuild_static_colliders(self):
-        """Construye colliders AABB de todos los objetos excepto el avatar y suelos caminables."""
         self.static_colliders = []
 
         avatar = getattr(self, "avatar", None)
 
         for obj in self.objects:
-            # No incluir avatar
+
             if obj is avatar:
                 continue
 
-            # Excluir objetos marcados como caminables
+            # ⛔ NO colisionan
             if getattr(obj, "is_walkable", False):
                 continue
 
-            # No podemos obtener matriz → no se usa como colisionador
+            # ⛔ NO colisionan (productos)
+            if isinstance(obj, InstancedModel3D):
+                continue
+
             if not hasattr(obj, "get_model_matrix"):
                 continue
 
-            # AABB local correcto
-            if hasattr(obj, "aabb_local") and callable(obj.aabb_local):
-                local = obj.aabb_local()
-            else:
-                local = (glm.vec3(-0.5, 0, -0.5), glm.vec3(0.5, 1.0, 0.5))
-
-            if not local:
+            if not hasattr(obj, "aabb_local") or not callable(obj.aabb_local):
                 continue
 
-            local_min, local_max = local
+            local_min, local_max = obj.aabb_local()
 
             wmin, wmax = aabb_world_from_local(
                 local_min, local_max,
@@ -117,10 +139,11 @@ class SceneManager:
             )
 
             self.static_colliders.append(
-                (glm.vec3(*wmin), glm.vec3(*wmax))
+                (glm.vec3(*wmin), glm.vec3(*wmax), obj)
             )
 
         print(f"✓ Colliders estáticos: {len(self.static_colliders)}")
+
 
     def get_entity_aabb_world(self, entity):
         """Devuelve AABB global del entity como glm.vec3, compatible con try_move()."""
@@ -171,14 +194,26 @@ class SceneManager:
 
         a_min, a_max = aabb
 
-        for b_min, b_max in self.static_colliders:
-            if aabb_overlap_3d((a_min.x, a_min.y, a_min.z),
-                               (a_max.x, a_max.y, a_max.z),
-                               (b_min.x, b_min.y, b_min.z),
-                               (b_max.x, b_max.y, b_max.z)):
-                # revertimos
+        for b_min, b_max, obj in self.static_colliders:
+
+            if aabb_overlap_3d(
+                (a_min.x, a_min.y, a_min.z),
+                (a_max.x, a_max.y, a_max.z),
+                (b_min.x, b_min.y, b_min.z),
+                (b_max.x, b_max.y, b_max.z)
+            ):
+                obj_name = getattr(obj, "name", type(obj).__name__)
+                obj_pos = getattr(obj, "position", None)
+
+                print(
+                    f"🚫 COLISIÓN con {obj_name} "
+                    f"| pos={obj_pos} "
+                    f"| avatar_pos={new_pos}"
+                )
+
                 entity.position = old_pos
                 return False
+
 
         return True
 
@@ -187,61 +222,69 @@ class SceneManager:
         best = None
         best_instance_id = -1
         best_t = None
+        best_instance_data = None
 
         for item in self.product_items:
-            # Para InstancedModel3D, verificar cada instancia
+
             from src.objects.InstancedModel3D import InstancedModel3D
-            
+
+            # --- Si és un model amb instàncies ---
             if isinstance(item, InstancedModel3D):
-                # Obtener AABB local base
+
                 local_aabb = item.aabb_local()
                 if local_aabb is None:
                     continue
-                
+
                 local_min, local_max = local_aabb
-                
-                # Verificar cada instancia
+
                 for inst_id, inst_data in enumerate(item.instances):
-                    # Construir matriz de transformación para esta instancia
+
                     pos = inst_data.get("pos", (0, 0, 0))
                     rot = inst_data.get("rot", (0, 0, 0))
                     scale = inst_data.get("scale", (1, 1, 1))
-                    
-                    # Normalizar a tuplas
-                    if isinstance(pos, (int, float)):
-                        pos = (pos, pos, pos)
-                    if isinstance(rot, (int, float)):
-                        rot = (rot, rot, rot)
-                    if isinstance(scale, (int, float)):
-                        scale = (scale, scale, scale)
-                    
-                    # Crear matriz de transformación para esta instancia
+
+                    # --- Normalitzar pos/rot/scale sempre a tuples de 3 ---
+                    def ensure_vec3(v, default):
+                        if isinstance(v, (int, float)):
+                            return (v, v, v)
+                        if hasattr(v, "__iter__") and len(v) == 3:
+                            return tuple(v)
+                        return default
+
+                    pos = ensure_vec3(pos, (0, 0, 0))
+                    rot = ensure_vec3(rot, (0, 0, 0))
+                    scale = ensure_vec3(scale, (1, 1, 1))
+
+                    # Matriu de transformació
                     m = glm.mat4(1.0)
                     m = glm.translate(m, glm.vec3(*pos))
-                    m = glm.rotate(m, glm.radians(rot[0]), glm.vec3(1, 0, 0))
-                    m = glm.rotate(m, glm.radians(rot[1]), glm.vec3(0, 1, 0))
-                    m = glm.rotate(m, glm.radians(rot[2]), glm.vec3(0, 0, 1))
+                    m = glm.rotate(m, glm.radians(rot[0]), glm.vec3(1,0,0))
+                    m = glm.rotate(m, glm.radians(rot[1]), glm.vec3(0,1,0))
+                    m = glm.rotate(m, glm.radians(rot[2]), glm.vec3(0,0,1))
                     m = glm.scale(m, glm.vec3(*scale))
-                    
-                    # Transformar AABB al espacio mundial
+
                     from src.utils.geometry import aabb_world_from_local, ray_aabb_intersection
                     wmin, wmax = aabb_world_from_local(local_min, local_max, m)
-                    
-                    # Raycast contra este AABB
-                    t = ray_aabb_intersection(ray_origin, ray_dir, 
+
+                    t = ray_aabb_intersection(ray_origin, ray_dir,
                                             glm.vec3(*wmin), glm.vec3(*wmax))
-                    
+
                     if t is None or t < 0:
                         continue
-                    
-                    # Guardar si es el más cercano
+
+                    # ⭐ NUEVO: Verificar si está visible (no bloqueado por estanterías)
+                    product_pos = glm.vec3(*pos)
+                    if self.is_product_occluded_by_shelf(ray_origin, product_pos):
+                        continue
+
                     if best_t is None or t < best_t:
                         best_t = t
                         best = item
                         best_instance_id = inst_id
-            
+                        best_instance_data = inst_data
+
+            # --- Si l'objecte NO és instàncies ---
             else:
-                # Objeto normal (no instanciado)
                 aabb = self.get_entity_aabb_world(item)
                 if aabb is None:
                     continue
@@ -249,19 +292,196 @@ class SceneManager:
                 a_min, a_max = aabb
                 from src.utils.geometry import ray_aabb_intersection
                 t = ray_aabb_intersection(ray_origin, ray_dir, a_min, a_max)
+
                 if t is None or t < 0:
+                    continue
+
+                # ⭐ NUEVO: Verificar visibilidad
+                product_center = (a_min + a_max) * 0.5
+                if self.is_product_occluded_by_shelf(ray_origin, product_center):
                     continue
 
                 if best_t is None or t < best_t:
                     best_t = t
                     best = item
                     best_instance_id = -1
+                    best_instance_data = None
 
-        return best, best_instance_id, best_t
+        # === TEST DE OCLUSIÓN POR PAREDES ===
+        if best is not None:
+            if self.is_occluded_by_walls(ray_origin, ray_dir, best_t):
+                return None, -1, None, None
+
+        # RETORNAR 4 VALORS
+        return best, best_instance_id, best_t, best_instance_data
+
+
+    def is_product_occluded_by_shelf(self, ray_origin, product_pos):
+        """
+        Verifica si una estantería bloquea la línea de visión al producto.
+        Retorna True si el producto está oculto detrás de una estantería.
+        """
+        ray_dir = glm.normalize(product_pos - ray_origin)
+        distance_to_product = glm.length(product_pos - ray_origin)
+        
+        for shelf in self.shelves:
+            if not hasattr(shelf, "aabb_local") or not callable(shelf.aabb_local):
+                continue
+                
+            local = shelf.aabb_local()
+            if not local:
+                continue
+                
+            local_min, local_max = local
+            
+            try:
+                wmin, wmax = aabb_world_from_local(local_min, local_max, shelf.get_model_matrix())
+            except:
+                continue
+            
+            from src.utils.geometry import ray_aabb_intersection
+            t = ray_aabb_intersection(
+                ray_origin,
+                ray_dir,
+                glm.vec3(*wmin),
+                glm.vec3(*wmax)
+            )
+            
+            if t is None or t < 0:
+                continue
+            
+            # Si la estantería está entre la cámara y el producto
+            # Usar margen de 0.3 para permitir productos EN la estantería
+            if 0.5 < t < distance_to_product - 0.1:
+                return True
+        
+        return False
+
+
+    def is_occluded_by_walls(self, ray_origin, ray_dir, hit_point_dist):
+        """
+        Verifica si alguna PARED bloquea la línea de visión.
+        Solo comprueba paredes y objetos sólidos, NO estanterías.
+        """
+        for obj in self.objects:
+
+            # Ignorar avatar
+            if obj is getattr(self, "avatar", None):
+                continue
+
+            # ⭐ Ignorar estanterías (se comprueban en is_product_occluded_by_shelf)
+            if obj in self.shelves:
+                continue
+            
+            # ⭐ Ignorar productos (solo queremos paredes/objetos sólidos)
+            if obj in self.product_items:
+                continue
+
+            # Objectes sense AABB local → ignorar
+            if not hasattr(obj, "aabb_local") or not callable(obj.aabb_local):
+                continue
+
+            local = obj.aabb_local()
+            if not local:
+                continue
+
+            local_min, local_max = local
+
+            # Obtenir AABB en món
+            try:
+                wmin, wmax = aabb_world_from_local(local_min, local_max, obj.get_model_matrix())
+            except:
+                continue
+
+            # Test ray–AABB
+            from src.utils.geometry import ray_aabb_intersection
+            t = ray_aabb_intersection(
+                ray_origin,
+                ray_dir,
+                glm.vec3(*wmin),
+                glm.vec3(*wmax)
+            )
+
+            if t is None or t < 0:
+                continue
+
+            # Si el objeto (pared) está ENTRE cámara y producto → bloqueado
+            if 0 < t < hit_point_dist - 0.001:
+                return True
+
+        return False
+    
+    
+    def is_occluded(self, ray_origin, ray_dir, hit_point_dist, ignore_obj=None):
+        """
+        Retorna True si ALGUNA cosa tapa la línia de visió.
+        Només compten objectes del món (parets, prestatgeries) que
+        tinguin AABB vàlid.
+        """
+        for obj in self.objects:
+
+            # Ignorar el producte que hem col·lisionat
+            if obj is ignore_obj:
+                continue
+
+            # Ignorar l’avatar
+            if obj is getattr(self, "avatar", None):
+                continue
+
+            # Objectes sense AABB local → ignorar
+            if not hasattr(obj, "aabb_local") or not callable(obj.aabb_local):
+                continue
+
+            local = obj.aabb_local()
+            if not local:
+                continue
+
+            local_min, local_max = local
+
+            # Obtenir AABB en món
+            try:
+                wmin, wmax = aabb_world_from_local(local_min, local_max, obj.get_model_matrix())
+            except:
+                continue
+
+            # Test ray–AABB
+            t = ray_aabb_intersection(
+                ray_origin,
+                ray_dir,
+                glm.vec3(*wmin),
+                glm.vec3(*wmax)
+            )
+
+            if t is None or t < 0:
+                continue
+
+            # Si l'objecte està ENTRE càmera i producte → està ocultat
+            if 0 < t < hit_point_dist - 0.001:
+                return True
+
+        return False
+
+
+
 
     # ======================================================================
     #                       ⬇️ CÓDIGO ORIGINAL COMPLETO
     # ======================================================================
+    def _create_imported_scene(self):
+        scene = Model3D(
+            self.app,
+            model_path="assets/models/escena1.glb",
+            position=glm.vec3(1.0, -0.1, 0.0),
+            scale=glm.vec3(0.75),
+            rotation=(0.0, 90.0, 0.0)
+        )
+
+        scene.is_walkable = True      # ⛔ NO colisiona
+        scene.name = "StoreStructure"
+
+        self._add_object(scene)
+
+
     def setup_main_room(self):
         print("🏗️ Construyendo sala del supermercado...")
 
@@ -274,50 +494,58 @@ class SceneManager:
         floor_tex = "assets/textures/floor_prove1.jpg"
         wall_tex = "assets/textures/wall_white.jpg"
 
-        self._create_floor(floor_tex, w, d)
+
+        # Suelo central
+        self._create_floor_at(floor_tex, w, d, x=0, z=0)
+
+        # Suelo derecho
+        self._create_floor_at(floor_tex, w*0.75, d, x=-10.33, z=-10.0)
+
+        # Suelo izquierdo
+        self._create_floor_at(floor_tex, w, d, x=-6.5, z=0)
 
         # ===== PAREDES =====
-        self._create_wall(
-            texture_path=wall_tex,
-            position=glm.vec3(0, h/2, -d/2 - t/2),
-            size=glm.vec3(w + 2*t, h, t),
-            uv_scale=(w/4, h/4),
-            rotation=(0, 0, 0),
-            face="front",
-            name="Pared trasera"
-        )
+        # self._create_wall(
+        #     texture_path=wall_tex,
+        #     position=glm.vec3(0, h/2, -d/2 - t/2),
+        #     size=glm.vec3(w + 2*t, h, t),
+        #     uv_scale=(w/4, h/4),
+        #     rotation=(0, 0, 0),
+        #     face="front",
+        #     name="Pared trasera"
+        # )
 
-        self._create_wall(
-            texture_path=wall_tex,
-            position=glm.vec3(-w/2 - t/2 + 1.0, h/2, 0),
-            size=glm.vec3(d, h, t),
-            uv_scale=(d/4, h/4),
-            rotation=(0, 90, 0),
-            face="back",
-            name="Pared izquierda"
-        )
+        # self._create_wall(
+        #     texture_path=wall_tex,
+        #     position=glm.vec3(-w/2 - t/2 + 1.0, h/2, 0),
+        #     size=glm.vec3(d, h, t),
+        #     uv_scale=(d/4, h/4),
+        #     rotation=(0, 90, 0),
+        #     face="back",
+        #     name="Pared izquierda"
+        # )
 
-        self._create_wall(
-            texture_path=wall_tex,
-            position=glm.vec3(w/2 + t/2, h/2, 0),
-            size=glm.vec3(d, h, t),
-            uv_scale=(d/4, h/4),
-            rotation=(0, -90, 0),
-            face="front",
-            name="Pared derecha"
-        )
+        # self._create_wall(
+        #     texture_path=wall_tex,
+        #     position=glm.vec3(w/2 + t/2, h/2, 0),
+        #     size=glm.vec3(d, h, t),
+        #     uv_scale=(d/4, h/4),
+        #     rotation=(0, -90, 0),
+        #     face="front",
+        #     name="Pared derecha"
+        # )
 
-        self._create_front_wall_with_door(wall_tex, w, h, d, t, cfg)
+        #self._create_front_wall_with_door(wall_tex, w, h, d, t, cfg)
 
-        self._create_wall(
-            texture_path=wall_tex,
-            position=glm.vec3(0, h + t/2, 0),
-            size=glm.vec3(w + 2*t, t, d + 2*t),
-            uv_scale=(w/4, d/4),
-            rotation=(90, 0, 0),
-            face="back",
-            name="Techo"
-        )
+        # self._create_wall(
+        #     texture_path=wall_tex,
+        #     position=glm.vec3(0, h + t/2, 0),
+        #     size=glm.vec3(w + 2*t, t, d + 2*t),
+        #     uv_scale=(w/4, d/4),
+        #     rotation=(90, 0, 0),
+        #     face="back",
+        #     name="Techo"
+        # )
 
         print(f"   → Sala lista.")
 
@@ -334,6 +562,25 @@ class SceneManager:
         self._add_object(asphalt)
 
     # -----------------------------------------------------------
+    
+    def _create_floor_at(self, texture_path, width, depth, x=0.0, y=0.01, z=0.0):
+        floor = Floor(
+            self.app,
+            texture_path=texture_path,
+            uv_scale=(width / 2.0, depth / 2.0)
+        )
+
+        floor.get_model_matrix = lambda: glm.translate(
+            glm.scale(glm.mat4(), glm.vec3(width / 10.0, 1.0, depth / 10.0)),
+            glm.vec3(x, y, z)
+        )
+
+        # ===== MARCAR COMO NO COLISIONABLE =====
+        floor.is_walkable = True
+
+        self._add_object(floor)
+
+    
     def _create_floor(self, texture_path, width, depth):
         floor = Floor(
             self.app,
@@ -349,6 +596,22 @@ class SceneManager:
         floor.is_walkable = True
         
         self._add_object(floor)
+
+    def _create_floor_offset(self, texture_path, width, depth, offset_x=0.0, offset_z=0.0):
+        floor = Floor(
+            self.app,
+            texture_path=texture_path,
+            uv_scale=(width / 2.0, depth / 2.0)
+        )
+
+        floor.get_model_matrix = lambda: glm.translate(
+            glm.scale(glm.mat4(), glm.vec3(width / 10.0, 1.0, depth / 10.0)),
+            glm.vec3(offset_x, 0.005, offset_z)
+        )
+
+        floor.is_walkable = True
+        self._add_object(floor)
+
 
     # -----------------------------------------------------------
     def _create_wall(self, texture_path, position, size, uv_scale, rotation, face, name):
@@ -411,25 +674,55 @@ class SceneManager:
     #                         OBJETOS DE LA ESCENA
     # ======================================================================
     def setup_cash_registers(self):
-        self.register1 = Model3D(
+        self.checkout1 = Model3DMultiMaterial(
             self.app,
-            model_path="assets/models/supermarket_checkout.glb",
+            "assets/models/Supermarket_Checkout.glb",
             position=glm.vec3(4.0, 0.0, -4.0),
-            scale=glm.vec3(0.4, 0.4, 0.4),
-            rotation=(0.0, -90.0, 0.0)
+            scale=glm.vec3(0.4),
+            rotation=(0, -90, 0)
         )
-        self._add_object(self.register1)
 
-        self.register2 = Model3D(
+        self._add_object(self.checkout1)
+
+        self.checkout2 = Model3DMultiMaterial(
             self.app,
-            model_path="assets/models/SupermarketCheckout.glb",
+            "assets/models/Supermarket_Checkout.glb",
             position=glm.vec3(4.0, 0.0, 2.0),
-            scale=glm.vec3(0.4, 0.4, 0.4),
-            rotation=(0.0, -90.0, 0.0)
+            scale=glm.vec3(0.4),
+            rotation=(0, -90, 0)
         )
-        self._add_object(self.register2)
+
+        self._add_object(self.checkout2)
+
+        # self.register1 = Model3D(
+        #     self.app,
+        #     model_path="assets/models/supermarket_checkout.glb",
+        #     position=glm.vec3(4.0, 0.0, -4.0),
+        #     scale=glm.vec3(0.4, 0.4, 0.4),
+        #     rotation=(0.0, -90.0, 0.0)
+        # )
+        # self._add_object(self.register1)
+
+        # self.register2 = Model3D(
+        #     self.app,
+        #     model_path="assets/models/Supermarket_Checkout.glb",
+        #     position=glm.vec3(4.0, 0.0, 2.0),
+        #     scale=glm.vec3(0.4, 0.4, 0.4),
+        #     rotation=(0.0, -90.0, 0.0)
+        # )
+        # self._add_object(self.register2)
 
     def _create_shelves(self):
+
+        # shelves = InstancedModel3D(
+        #     self.app,
+        #     model_path="assets/models/supermarket_shelves/shelves2.glb",
+        #     instances=SHELVES
+        # )
+        # self._add_object(shelves)
+        # self.product_items.append(shelves)
+
+
         shelf_path = "assets/models/supermarket_shelves/shelves2.glb"
         for entry in SHELVES:
             pos = entry["pos"]
@@ -447,7 +740,7 @@ class SceneManager:
     def _create_water_packs(self):
         water = InstancedModel3D(
             self.app,
-            model_path="assets/models/bottle_water.glb",
+            model_path="assets/models/water_bottle2.glb",
             instances=WATER_PACKS
         )
         self._add_object(water)
@@ -480,6 +773,33 @@ class SceneManager:
         self._add_object(apples)
         self.product_items.append(apples)
 
+    def _create_orange(self):
+        orange = InstancedModel3D(
+            self.app,
+            model_path="assets/models/orange.glb",
+            instances=ORANGE
+        )
+        self._add_object(orange)
+        self.product_items.append(orange)
+
+    def _create_kinder(self):
+        kinder = InstancedModel3D(
+            self.app,
+            model_path="assets/models/kinder.glb",
+            instances=KINDER
+        )
+        self._add_object(kinder)
+        self.product_items.append(kinder)
+    
+    def _create_tuna(self):
+        tuna = InstancedModel3D(
+            self.app,
+            model_path="assets/models/tuna.glb",
+            instances=TUNA
+        )
+        self._add_object(tuna)
+        self.product_items.append(tuna)
+
     def _create_cereals(self):
         cereals = InstancedModel3D(
             self.app,
@@ -497,6 +817,87 @@ class SceneManager:
         )
         self._add_object(wine)
         self.product_items.append(wine)
+
+    def _create_cocacola(self):
+        cocacola = InstancedModel3D(
+            self.app,
+            model_path="assets/models/coke_can.glb",
+            instances=COCACOLA
+        )
+        self._add_object(cocacola)
+        self.product_items.append(cocacola)
+
+    def _create_cava(self):
+        cava = InstancedModel3D(
+            self.app,
+            model_path="assets/models/champagne_bottle.glb",
+            instances=CAVA
+        )
+        self._add_object(cava)
+        self.product_items.append(cava)
+
+    def _create_whiskey(self):
+        whiskey = InstancedModel3D(
+            self.app,
+            model_path="assets/models/whiskey.glb",
+            instances=WHISKEY
+        )
+        self._add_object(whiskey)
+        self.product_items.append(whiskey)
+
+    def _create_paper(self):
+        paper = InstancedModel3D(
+            self.app,
+            model_path="assets/models/toilet_paper.glb",
+            instances=PAPER
+        )
+        self._add_object(paper)
+        self.product_items.append(paper)
+
+    def _create_shampoo(self):
+        shampoo = InstancedModel3D(
+            self.app,
+            model_path="assets/models/shampoo.glb",
+            instances=SHAMPOO
+        )
+        self._add_object(shampoo)
+        self.product_items.append(shampoo)
+
+    def _create_sponge(self):
+        sponge = InstancedModel3D(
+            self.app,
+            model_path="assets/models/sponge.glb",
+            instances=SPONGE
+        )
+        self._add_object(sponge)
+        self.product_items.append(sponge)
+
+    def _create_candle(self):
+        candle = InstancedModel3D(
+            self.app,
+            model_path="assets/models/candle3.glb",
+            instances=CANDLE
+        )
+        self._add_object(candle)
+        self.product_items.append(candle)
+
+    def _create_jarron(self):
+        jarron = InstancedModel3D(
+            self.app,
+            model_path="assets/models/jarron.glb",
+            instances=JARRON
+        )
+        self._add_object(jarron)
+        self.product_items.append(jarron)
+
+    def _create_mug(self):
+        mug = InstancedModel3D(
+            self.app,
+            model_path="assets/models/mug4.glb",
+            instances=MUG
+        )
+        self._add_object(mug)
+        self.product_items.append(mug)
 
     def _create_avatar(self):
         """Crea un capsule collider invisible como avatar físico."""
@@ -527,6 +928,22 @@ class SceneManager:
         print(f"✓ Total colliders estáticos: {len(self.static_colliders)}")
 
 
+    def get_scene_bounds(self):
+        min_x = +10
+        max_x = -10
+        min_z = +10
+        max_z = -10
+
+        for obj in self.objects:   # Ajusta según tu lista real de objetos
+            if hasattr(obj, "position"):
+                px, pz = obj.position.x, obj.position.z
+                min_x = min(min_x, px)
+                max_x = max(max_x, px)
+                min_z = min(min_z, pz)
+                max_z = max(max_z, pz)
+
+        # Añadir un pequeño margen
+        return min_x - 1, max_x + 1, min_z - 1, max_z + 1
 
 
 

@@ -21,10 +21,14 @@ class UIManager:
         self.on_continue_shopping = None
         self.on_checkout = None
         self.on_apply_config = None
+        self.on_return_to_login = None
+
 
         # Añadidos por tu compañero
-        self.on_cart_add_apple = None
-        self.on_cart_remove_apple = None
+        self.on_cart_add_item = None
+        self.on_cart_remove_item = None
+
+
         
         # Crear menú principal al inicio
         self.menu_gui.create_main_menu()
@@ -42,25 +46,26 @@ class UIManager:
 
     def handle_ui_events(self, event):
         """Procesa eventos de UI con debug"""
+
         if event.type == pg.MOUSEBUTTONDOWN:
             print(f"🖱️ Mouse click en: {event.pos}")
 
         if event.type == pygame_gui.UI_BUTTON_PRESSED:
             ui_element = event.ui_element
-            
-            print(f"🔘 Botón presionado: {ui_element.text if hasattr(ui_element, 'text') else 'Sin texto'}")
-            
+            name = ui_element.text if hasattr(ui_element, "text") else "?(sin texto)"
+            print(f"🔘 Botón presionado: {name}")
+
             # -------------------------------
             # MENÚ PRINCIPAL
             # -------------------------------
             if hasattr(self.menu_gui, 'btn_productos') and ui_element == self.menu_gui.btn_productos:
                 print("📦 Botón Productos presionado")
                 if self.on_productos_click: self.on_productos_click()
-                    
+
             elif hasattr(self.menu_gui, 'btn_carrito') and ui_element == self.menu_gui.btn_carrito:
                 print("🛒 Botón Carrito presionado")
                 if self.on_carrito_click: self.on_carrito_click()
-                    
+
             elif hasattr(self.menu_gui, 'btn_config') and ui_element == self.menu_gui.btn_config:
                 print("⚙️ Botón Configuración presionado")
                 if self.on_config_click: self.on_config_click()
@@ -69,6 +74,12 @@ class UIManager:
                 print("❌ Botón Cerrar Menú presionado")
                 if self.on_close_menu: self.on_close_menu()
 
+            # ⭐⭐⭐ NUEVO — VOLVER AL LOGIN ⭐⭐⭐
+            elif hasattr(self.menu_gui, 'btn_return_login') and ui_element == self.menu_gui.btn_return_login:
+                print("🔄 Botón Volver al Inicio presionado")
+                if hasattr(self, "on_return_to_login") and self.on_return_to_login:
+                    self.on_return_to_login()
+
             # -------------------------------
             # MENÚ CONTEXTUAL
             # -------------------------------
@@ -76,12 +87,12 @@ class UIManager:
                 print("🔄 Botón Reset Camera presionado")
                 if self.on_reset_camera: self.on_reset_camera()
                 self._close_context_menu()
-                        
+
             elif hasattr(self.menu_gui, 'btn_fullscreen') and ui_element == self.menu_gui.btn_fullscreen:
                 print("📺 Botón Toggle Fullscreen presionado")
                 if self.on_toggle_fullscreen: self.on_toggle_fullscreen()
                 self._close_context_menu()
-                        
+
             elif hasattr(self.menu_gui, 'btn_exit_app') and ui_element == self.menu_gui.btn_exit_app:
                 print("🚪 Botón Exit presionado")
                 if self.on_exit: self.on_exit()
@@ -94,28 +105,31 @@ class UIManager:
                 if self.on_close_menu: self.on_close_menu()
 
             # -------------------------------
-            # MENÚ DEL CARRITO (TU + MEJORAS)
+            # MENÚ DEL CARRITO
             # -------------------------------
             elif hasattr(self.menu_gui, 'btn_continue_shopping') and ui_element == self.menu_gui.btn_continue_shopping:
                 print("🛍️ Botón Seguir Comprando presionado")
                 if self.on_continue_shopping: self.on_continue_shopping()
-                    
+
             elif hasattr(self.menu_gui, 'btn_checkout') and ui_element == self.menu_gui.btn_checkout:
                 print("💳 Botón Checkout presionado")
                 if self.on_checkout: self.on_checkout()
-                    
+
             elif hasattr(self.menu_gui, 'btn_close_cart') and ui_element == self.menu_gui.btn_close_cart:
                 print("❌ Botón Cerrar Carrito presionado")
                 if self.on_close_menu: self.on_close_menu()
 
-            # Botones específicos de carrito que añadió tu compañero
-            elif hasattr(self.menu_gui, 'btn_add_apple') and ui_element == self.menu_gui.btn_add_apple:
-                print("➕ Añadir manzana desde carrito")
-                if self.on_cart_add_apple: self.on_cart_add_apple()
+            # -------------------------------
+            # BOTONES +/- DEL CARRITO
+            # -------------------------------
+            elif hasattr(self.menu_gui, 'btn_add_item') and ui_element == self.menu_gui.btn_add_item:
+                if self.on_cart_add_item:
+                    self.on_cart_add_item()
 
-            elif hasattr(self.menu_gui, 'btn_remove_apple') and ui_element == self.menu_gui.btn_remove_apple:
-                print("➖ Quitar manzana desde carrito")
-                if self.on_cart_remove_apple: self.on_cart_remove_apple()
+            elif hasattr(self.menu_gui, 'btn_remove_item') and ui_element == self.menu_gui.btn_remove_item:
+                if self.on_cart_remove_item:
+                    self.on_cart_remove_item()
+
 
             # -------------------------------
             # MENÚ DE CONFIGURACIÓN
@@ -123,7 +137,7 @@ class UIManager:
             elif hasattr(self.menu_gui, 'btn_apply_config') and ui_element == self.menu_gui.btn_apply_config:
                 print("✅ Botón Aplicar Configuración presionado")
                 if self.on_apply_config: self.on_apply_config()
-                    
+
             elif hasattr(self.menu_gui, 'btn_close_config') and ui_element == self.menu_gui.btn_close_config:
                 print("❌ Botón Cerrar Configuración presionado")
                 if self.on_close_menu: self.on_close_menu()
@@ -134,8 +148,19 @@ class UIManager:
             elif hasattr(self.menu_gui, 'product_buttons'):
                 for i, btn in enumerate(self.menu_gui.product_buttons):
                     if ui_element == btn:
-                        print(f"📦 Producto {i+1} añadido al carrito")
-                        # Puedes añadir callback si quieres
+                        print(f"📦 Producto {i+1} seleccionado desde UI")
+                        # Callback opcional
+
+        elif event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
+            if hasattr(self.menu_gui, "_cart_line_map"):
+                # Seleccionar producto según índice
+                idx = event.link_target
+                if idx < len(self.menu_gui._cart_line_map):
+                    self.menu_gui.selected_cart_product = self.menu_gui._cart_line_map[idx]
+                    self.menu_gui.update_cart_display(self.menu_gui.cart_snapshot)
+
+
+        
 
     # ======================================================================
     # CONTEXT MENU

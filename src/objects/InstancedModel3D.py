@@ -93,28 +93,47 @@ class InstancedModel3D:
     # ================================================================
     
     def _get_product_type_from_path(self, path):
-        """
-        Extrae el tipo de producto del nombre del archivo.
-        
-        Returns:
-            str: Tipo de producto ('water', 'chips', 'milk', etc.)
-        """
         filename = os.path.basename(path).lower()
-        
-        if "water" in filename or "bottle_water" in filename:
+
+        if "water" in filename:
             return "water"
-        elif "chips" in filename or "chip" in filename:
+        elif "chips" in filename:
             return "chips"
         elif "milk" in filename:
             return "milk"
         elif "apple" in filename:
             return "apple"
+        elif "orange" in filename:
+            return "orange"
+        elif "kinder" in filename:
+            return "kinder"
+        elif "tuna" in filename:
+            return "tuna"
         elif "cereal" in filename:
             return "cereals"
         elif "wine" in filename:
             return "wine"
+        elif "coke" in filename or "coca" in filename:
+            return "cocacola"
+        elif "cava" in filename or "champagne" in filename:
+            return "cava"
+        elif "whiskey" in filename:
+            return "whiskey"
+        elif "paper" in filename:
+            return "paper"
+        elif "shampoo" in filename:
+            return "shampoo"
+        elif "sponge" in filename:
+            return "sponge"
+        elif "candle" in filename:
+            return "candle"
+        elif "jarron" in filename:
+            return "jarron"
+        elif "mug" in filename:
+            return "mug"
         else:
             return "unknown"
+
 
     # ================================================================
     # CARGA DE GLTF

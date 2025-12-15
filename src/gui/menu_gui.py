@@ -24,9 +24,10 @@ class MenuGUI:
         self.current_menu = None
 
         # Widgets dinámicos del carrito
+        self.selected_cart_product = None
         self.cart_textbox = None
-        self.btn_add_apple = None
-        self.btn_remove_apple = None
+
+        self.btn_return_login = None
 
     # ======================================================================
     #  MAIN MENU
@@ -38,7 +39,7 @@ class MenuGUI:
             self.main_menu.kill()
 
         self.main_menu = UIWindow(
-            rect=pg.Rect(20, 20, 300, 500),
+            rect=pg.Rect(20, 20, 300, 600),
             manager=self.ui_manager,
             window_display_title='3D Store Menu',
             object_id='#main_menu'
@@ -94,6 +95,21 @@ class MenuGUI:
         # ---------------------------
         self._create_controls_section(y_pos)
 
+        # Mover y_pos después de controles
+        y_pos += 200
+
+        # ⭐ ------------------------------------------------------------------
+        # ⭐ NUEVO BOTÓN: VOLVER AL LOGIN
+        # ⭐ ------------------------------------------------------------------
+        self.btn_return_login = UIButton(
+            relative_rect=pg.Rect(10, y_pos, 280, 40),
+            text='🔄 Volver al Inicio',
+            manager=self.ui_manager,
+            container=self.main_menu,
+            object_id='#btn_return_login'
+        )
+        y_pos += 50
+
         return self.main_menu
 
     def _create_controls_section(self, y_pos):
@@ -135,6 +151,7 @@ class MenuGUI:
             container=self.main_menu,
             object_id='#btn_close'
         )
+
 
     # ======================================================================
     #  CONTEXT MENU
@@ -255,39 +272,39 @@ class MenuGUI:
             object_id='#cart_content'
         )
 
+
         # -----------------------------
         # BOTONES + / - PARA AJUSTAR CANTIDADES
         # -----------------------------
-        self.btn_remove_apple = UIButton(
+        self.btn_remove_item = UIButton(
             relative_rect=pg.Rect(250, 40, 30, 30),
             text='−',
             manager=self.ui_manager,
             container=self.cart_menu,
-            object_id='#btn_remove_apple'
+            object_id='#btn_remove_item'
         )
 
-        self.btn_add_apple = UIButton(
+        self.btn_add_item = UIButton(
             relative_rect=pg.Rect(290, 40, 30, 30),
             text='+',
             manager=self.ui_manager,
             container=self.cart_menu,
-            object_id='#btn_add_apple'
+            object_id='#btn_add_item'
         )
 
-        # Inicialmente ocultos
-        self.btn_remove_apple.hide()
-        self.btn_add_apple.hide()
+        self.btn_add_item.hide()
+        self.btn_remove_item.hide()
 
         # -----------------------------
         # BOTONES DEL CARRITO
         # -----------------------------
-        self.btn_continue_shopping = UIButton(
-            relative_rect=pg.Rect(10, 285, 185, 35),
-            text='Seguir Comprando',
-            manager=self.ui_manager,
-            container=self.cart_menu,
-            object_id='#btn_continue_shopping'
-        )
+        # self.btn_continue_shopping = UIButton(
+        #     relative_rect=pg.Rect(10, 285, 185, 35),
+        #     text='Seguir Comprando',
+        #     manager=self.ui_manager,
+        #     container=self.cart_menu,
+        #     object_id='#btn_continue_shopping'
+        # )
 
         self.btn_checkout = UIButton(
             relative_rect=pg.Rect(205, 285, 185, 35),
@@ -311,6 +328,8 @@ class MenuGUI:
     #  MÉTODO NUEVO (HEREDADO DE TU COMPAÑERO)
     # ----------------------------------------------------------------------
 
+    # En menu_gui.py, reemplaza el método update_cart_display:
+
     def update_cart_display(self, cart_dict):
         """
         Actualiza el contenido textual del carrito a partir de un dict {product_type: qty}.
@@ -319,27 +338,49 @@ class MenuGUI:
         total_items = sum(cart_dict.values()) if cart_dict else 0
 
         if total_items == 0:
-            html = "<b>Tu carrito está vacío</b>"
+            self.selected_cart_product = None
+            self.btn_add_item.hide()
+            self.btn_remove_item.hide()
+            self.cart_textbox.set_text("<b>Tu carrito está vacío</b>")
+            return
 
-            if self.btn_add_apple:
-                self.btn_add_apple.hide()
-            if self.btn_remove_apple:
-                self.btn_remove_apple.hide()
+        html = "<b>Contenido del carrito:</b><br><br>"
+            
+        # ✅ SOLUCIÓN 1: Mostrar TODOS los productos, no solo manzanas
+        product_names = {
+            "apple": "Manzana",
+            "orange": "Naranja",
+            "water": "Agua",
+            "chips": "Patatas",
+            "milk": "Leche",
+            "kinder": "Kinder",
+            "cereals": "Cereales",
+            "wine": "Vino",
+            "cocacola": "Coca-Cola",
+            "cava": "Cava",
+            "whiskey": "Whiskey",
+            "paper": "Papel higiénico",
+            "shampoo": "Champú",
+            "sponge": "Esponja",
+            "candle": "Vela",
+            "jarron": "Jarrón",
+            "mug": "Taza",
+            "tuna": "Atún"
+        }
+        
+        # Seleccionamos automáticamente el primer producto
+        self.selected_cart_product = next(iter(cart_dict))
+        self._cart_line_map = []
+        for product, qty in cart_dict.items():
+            if qty > 0:
+                self._cart_line_map.append(product)
+                name = product_names.get(product, product.capitalize())
+                marker = "👉 " if product == self.selected_cart_product else ""
+                html += f"{marker}{name}: <b>{qty}</b><br>"
 
-        else:
-            html = "<b>Contenido del carrito:</b><br>"
-            qty_apple = cart_dict.get("apple", 0)
-
-            if qty_apple > 0:
-                html += f"- Manzana: {qty_apple} ud.<br>"
-
-            html += f"<br><i>Total de artículos: {total_items}</i>"
-
-            self.btn_add_apple.show()
-            self.btn_remove_apple.show()
-
-        if self.cart_textbox:
-            self.cart_textbox.set_text(html)
+        self.cart_textbox.set_text(html)
+        self.btn_add_item.show()
+        self.btn_remove_item.show()
 
     # ======================================================================
     #  CONFIG MENU
@@ -402,6 +443,84 @@ class MenuGUI:
         )
 
         return self.config_menu
+    
+    # ======================================================================
+    #  UI EVENT HANDLING (BOTONES)
+    # ======================================================================
+
+    def process_event(self, event):
+        """
+        Procesa eventos de UI y llama a los callbacks correspondientes
+        definidos en UIManager.
+        Se debe llamar desde UIManager.handle_ui_events(event).
+        """
+        if event.type != pygame_gui.UI_BUTTON_PRESSED:
+            return
+
+        # -------------------------
+        # BOTONES DEL MENÚ PRINCIPAL
+        # -------------------------
+
+        if event.ui_element == self.btn_productos:
+            if self.ui_manager.on_productos_click:
+                self.ui_manager.on_productos_click()
+
+        elif event.ui_element == self.btn_carrito:
+            if self.ui_manager.on_carrito_click:
+                self.ui_manager.on_carrito_click()
+
+        elif event.ui_element == self.btn_config:
+            if self.ui_manager.on_config_click:
+                self.ui_manager.on_config_click()
+
+        elif event.ui_element == self.btn_close_menu:
+            if self.ui_manager.on_close_menu:
+                self.ui_manager.on_close_menu()
+
+        # ⭐ NUEVO → VOLVER AL LOGIN ⭐
+        elif event.ui_element == self.btn_return_login:
+            print("🔄 Botón 'Volver al Inicio' pulsado")
+            if hasattr(self.ui_manager, "on_return_to_login"):
+                self.ui_manager.on_return_to_login()
+
+        # -------------------------
+        # MENÚ DE PRODUCTOS
+        # -------------------------
+
+        elif event.ui_element in self.product_buttons:
+            idx = self.product_buttons.index(event.ui_element)
+            product_name = f"product_{idx}"
+            print(f"Seleccionado producto: {product_name}")
+
+        elif event.ui_element == self.btn_close_products:
+            self.hide_all_menus()
+
+        # -------------------------
+        # MENÚ DEL CARRITO
+        # -------------------------
+
+        elif event.ui_element == self.btn_continue_shopping:
+            if self.ui_manager.on_continue_shopping:
+                self.ui_manager.on_continue_shopping()
+
+        elif event.ui_element == self.btn_checkout:
+            if self.ui_manager.on_checkout:
+                self.ui_manager.on_checkout()
+
+        elif event.ui_element == self.btn_close_cart:
+            self.hide_all_menus()
+
+        # -------------------------
+        # CONFIGURACIÓN
+        # -------------------------
+
+        elif event.ui_element == self.btn_apply_config:
+            if self.ui_manager.on_apply_config:
+                self.ui_manager.on_apply_config()
+
+        elif event.ui_element == self.btn_close_config:
+            self.hide_all_menus()
+
 
     # ======================================================================
     #  MENU HANDLING

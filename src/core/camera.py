@@ -17,7 +17,7 @@ class Camera:
         # --------------------------------------------------------------
         # Ubicación: parte frontal-derecha del supermercado
         # Altura: 1.7 m (altura humana)
-        self.position = glm.vec3(8.0, 1.7, 12.0)
+        self.position = glm.vec3(5.0, 1.7, 12.0)
 
         # Vectores base
         self.up = glm.vec3(0, 1, 0)
@@ -103,6 +103,8 @@ class Camera:
     # MOUSE INPUT
     # ======================================================================
 
+    # En camera.py, reemplaza el método process_mouse_movement:
+
     def process_mouse_movement(self, x_offset, y_offset, constrain_pitch=True):
         """Procesa el movimiento del ratón para rotar la cámara."""
         
@@ -112,12 +114,10 @@ class Camera:
         self.yaw += x_offset
         self.pitch += y_offset
         
-        # --------------------------------------------------------------
-        # ❗ PITCH LIMIT — Solo se incorpora este cambio del compañero
-        # --------------------------------------------------------------
+        # ✅ SOLUCIÓN 3: Permitir mirar hacia abajo correctamente
         if constrain_pitch:
             max_pitch = 89.0     # casi mirar al cielo
-            min_pitch = -20.0    # no permitir mirar totalmente abajo
+            min_pitch = -89.0    # permitir mirar hacia abajo (era -20.0)
 
             if self.pitch > max_pitch:
                 self.pitch = max_pitch
